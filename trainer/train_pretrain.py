@@ -46,8 +46,9 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             lr = args.learning_rate * global_step / warmup_steps
         else:
             lr = get_lr(global_step - warmup_steps, total_steps - warmup_steps, args.learning_rate)
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+        for opt in optimizers:
+            for param_group in opt.param_groups:
+                param_group['lr'] = lr * param_group.get('lr_ratio', 1.0)
 
         with autocast_ctx:
             res = model(input_ids, labels=labels)
@@ -57,13 +58,13 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
         scaler.scale(loss).backward()
 
         if step % args.accumulation_steps == 0 or last_step:
-            scaler.unscale_(optimizer)
+            for opt in optimizers: scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
 
-            scaler.step(optimizer)
+            for opt in optimizers: scaler.step(opt)
             scaler.update()
 
-            optimizer.zero_grad(set_to_none=True)
+            for opt in optimizers: opt.zero_grad(set_to_none=True)
 
         if step % args.log_interval == 0 or last_step:
             spend_time = time.time() - start_time
@@ -129,6 +130,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_key_value_heads", default=None, type=int, help="Nb de têtes K/V, GQA (défaut config)")
     parser.add_argument("--intermediate_size", default=None, type=int, help="Largeur interne du FFN (défaut config)")
     parser.add_argument("--save_resume", default=1, type=int, choices=[0, 1], help="Écrire le checkpoint de reprise (modèle+optimiseur, ~750Mo) dans ../checkpoints")
+    parser.add_argument("--optimizer", default="adamw", choices=["adamw", "muon"], help="muon = Muon pour les matrices des blocs + AdamW pour le reste")
+    parser.add_argument("--muon_lr", default=0.02, type=float, help="LR de pointe de Muon (suit le même warmup/cosinus que l'AdamW)")
     parser.add_argument("--packing", default=0, type=int, choices=[0, 1], help="Sequence packing : blocs pleins sans padding (0=non, 1=oui)")
     parser.add_argument("--max_tokens", default=0, type=int, help="Budget de tokens traités (batch_size*max_seq_len par step) ; 0 = epochs complètes")
     parser.add_argument("--val_docs", default=2000, type=int, help="Nb de documents (fin du fichier) réservés à la validation ; 0 = pas de validation")
@@ -186,9 +189,17 @@ if __name__ == "__main__":
     Logger(f'train: {len(train_ds)} séquences, total_steps: {total_steps} (~{total_steps * tokens_per_step / 1e6:.0f}M tokens)')
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
     scaler = torch.amp.GradScaler('cuda', enabled=(args.dtype == 'float16'))
-    decay = [p for p in model.parameters() if p.dim() >= 2]
+    # Muon : matrices des blocs (q/k/v/o, gate/up/down) ; AdamW : embedding (partagé avec lm_head) et normes
+    muon_params = [p for n, p in model.named_parameters() if args.optimizer == 'muon' and p.dim() == 2 and 'embed_tokens' not in n]
+    muon_ids = {id(p) for p in muon_params}
+    decay = [p for p in model.parameters() if p.dim() >= 2 and id(p) not in muon_ids]
     no_decay = [p for p in model.parameters() if p.dim() < 2]
     optimizer = optim.AdamW([{'params': decay, 'weight_decay': args.weight_decay}, {'params': no_decay, 'weight_decay': 0.0}], lr=args.learning_rate)
+    optimizers = [optimizer]
+    if args.optimizer == 'muon':
+        assert not args.save_resume, "--save_resume non supporté avec Muon (un seul état d'optimiseur sauvegardé)"
+        optimizers.append(torch.optim.Muon([{'params': muon_params, 'lr_ratio': args.muon_lr / args.learning_rate}], lr=args.muon_lr, weight_decay=args.weight_decay))
+        Logger(f'Muon : {sum(p.numel() for p in muon_params) / 1e6:.1f}M params ; AdamW : {sum(p.numel() for p in decay + no_decay) / 1e6:.1f}M params')
     
     mlflow = None
     if args.use_mlflow and is_main_process():

@@ -1,0 +1,8 @@
+# Référence AdamW à cette base (acc2) : 2.488 (s42) / 2.484 (s2), cf. sweep batch
+# Muon : matrices des blocs ; AdamW (LR 7e-4) : embedding + normes
+muon0.01-s42 --optimizer muon --muon_lr 0.01
+muon0.02-s42 --optimizer muon --muon_lr 0.02
+muon0.04-s42 --optimizer muon --muon_lr 0.04
+muon0.02-s2  --optimizer muon --muon_lr 0.02 --seed 2
+# Batch encore plus petit (32 séq., ~4600 mises à jour) avec AdamW
+acc1-s42     --accumulation_steps 1
