@@ -1,0 +1,6 @@
+# Architecture à ~64M params, recette figée (Muon 0.01, batch 64). Référence ref64-s42 = 2.350
+profond12x640 --optimizer muon --muon_lr 0.01 --hidden_size 640 --num_hidden_layers 12
+large5x960    --optimizer muon --muon_lr 0.01 --hidden_size 960 --num_hidden_layers 5
+kv1           --optimizer muon --muon_lr 0.01 --num_key_value_heads 1
+kv8           --optimizer muon --muon_lr 0.01 --num_key_value_heads 8
+moe4x1        --optimizer muon --muon_lr 0.01 --use_moe 1
