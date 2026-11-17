@@ -1,0 +1,4 @@
+# Affinage Muon. Référence : muon0.01-s42 = 2.347 ; muon0.02 s42/s2 = 2.355/2.351
+muon0.005-s42     --optimizer muon --muon_lr 0.005
+muon0.01-s2       --optimizer muon --muon_lr 0.01 --seed 2
+muon0.01-acc1-s42 --optimizer muon --muon_lr 0.01 --accumulation_steps 1
