@@ -6,6 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import datasets  # noqa: F401  # Windows pyarrow/torch DLL conflict workaround (issue #771)
 import argparse
+import random
 import time
 import warnings
 import torch
@@ -15,18 +16,36 @@ from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, DistributedSampler
 from model.model_minimind import MiniMindConfig
-from dataset.lm_dataset import PretrainDataset
+from datasets import load_dataset
+from dataset.lm_dataset import PretrainDataset, PackedPretrainDataset
 from trainer.trainer_utils import get_lr, Logger, is_main_process, lm_checkpoint, init_distributed_mode, setup_seed, init_model, SkipBatchSampler
 
 warnings.filterwarnings('ignore')
 
 
+@torch.no_grad()
+def evaluate(val_loader):
+    model.eval()
+    losses = []
+    for input_ids, labels in val_loader:
+        with autocast_ctx:
+            losses.append(model(input_ids.to(args.device), labels=labels.to(args.device)).loss.item())
+    model.train()
+    return sum(losses) / len(losses)
+
+
 def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
     start_time = time.time()
     for step, (input_ids, labels) in enumerate(loader, start=start_step + 1):
+        global_step = epoch * iters + step
+        last_step = step == iters or global_step >= total_steps
         input_ids = input_ids.to(args.device)
         labels = labels.to(args.device)
-        lr = get_lr(epoch * iters + step, args.epochs * iters, args.learning_rate)
+        warmup_steps = int(args.warmup_ratio * total_steps)
+        if global_step < warmup_steps:
+            lr = args.learning_rate * global_step / warmup_steps
+        else:
+            lr = get_lr(global_step - warmup_steps, total_steps - warmup_steps, args.learning_rate)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
@@ -37,7 +56,7 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
 
         scaler.scale(loss).backward()
 
-        if step % args.accumulation_steps == 0 or step == iters:
+        if step % args.accumulation_steps == 0 or last_step:
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
 
@@ -46,7 +65,7 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
 
             optimizer.zero_grad(set_to_none=True)
 
-        if step % args.log_interval == 0 or step == iters:
+        if step % args.log_interval == 0 or last_step:
             spend_time = time.time() - start_time
             current_loss = loss.item() * args.accumulation_steps
             current_aux_loss = res.aux_loss.item() if res.aux_loss is not None else 0.0
@@ -55,8 +74,14 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             eta_min = spend_time / max(step - start_step, 1) * (iters - step) // 60
             Logger(f'Epoch:[{epoch + 1}/{args.epochs}]({step}/{iters}), loss: {current_loss:.4f}, logits_loss: {current_logits_loss:.4f}, aux_loss: {current_aux_loss:.4f}, lr: {current_lr:.8f}, epoch_time: {eta_min:.1f}min')
             if wandb: wandb.log({"loss": current_loss, "logits_loss": current_logits_loss, "aux_loss": current_aux_loss, "learning_rate": current_lr, "epoch_time": eta_min})
+            if mlflow: mlflow.log_metrics({"train_loss": current_loss, "learning_rate": current_lr, "tokens_seen": global_step * tokens_per_step, "tokens_per_sec": (step - start_step) * tokens_per_step / spend_time}, step=global_step)
 
-        if (step % args.save_interval == 0 or step == iters) and is_main_process():
+        if val_loader is not None and (step % args.eval_interval == 0 or last_step):
+            val_loss = evaluate(val_loader)
+            Logger(f'step {global_step}: val_loss {val_loss:.4f}')
+            if mlflow: mlflow.log_metric("val_loss", val_loss, step=global_step)
+
+        if (step % args.save_interval == 0 or last_step) and is_main_process():
             model.eval()
             moe_suffix = '_moe' if lm_config.use_moe else ''
             ckp = f'{args.save_dir}/{args.save_weight}_{lm_config.hidden_size}{moe_suffix}.pth'
@@ -64,11 +89,13 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             raw_model = getattr(raw_model, '_orig_mod', raw_model)
             state_dict = raw_model.state_dict()
             torch.save({k: v.half().cpu() for k, v in state_dict.items()}, ckp)
-            lm_checkpoint(lm_config, weight=args.save_weight, model=model, optimizer=optimizer, scaler=scaler, epoch=epoch, step=step, wandb=wandb, save_dir='../checkpoints')
+            if args.save_resume: lm_checkpoint(lm_config, weight=args.save_weight, model=model, optimizer=optimizer, scaler=scaler, epoch=epoch, step=step, wandb=wandb, save_dir='../checkpoints')
             model.train()
             del state_dict
 
         del input_ids, labels, res, loss
+        if global_step >= total_steps: return True
+    return False
 
 
 if __name__ == "__main__":
@@ -96,6 +123,20 @@ if __name__ == "__main__":
     parser.add_argument("--use_wandb", action="store_true", help="是否使用wandb")
     parser.add_argument("--wandb_project", type=str, default="MiniMind-Pretrain", help="wandb项目名")
     parser.add_argument("--use_compile", default=0, type=int, choices=[0, 1], help="是否使用torch.compile加速（0=否，1=是）")
+    parser.add_argument("--warmup_ratio", default=0.0, type=float, help="Part des steps en warmup linéaire (0 = pas de warmup)")
+    parser.add_argument("--weight_decay", default=0.01, type=float, help="Weight decay AdamW (appliqué aux matrices seulement, pas aux normes)")
+    parser.add_argument("--num_attention_heads", default=None, type=int, help="Nb de têtes Q (défaut config)")
+    parser.add_argument("--num_key_value_heads", default=None, type=int, help="Nb de têtes K/V, GQA (défaut config)")
+    parser.add_argument("--intermediate_size", default=None, type=int, help="Largeur interne du FFN (défaut config)")
+    parser.add_argument("--save_resume", default=1, type=int, choices=[0, 1], help="Écrire le checkpoint de reprise (modèle+optimiseur, ~750Mo) dans ../checkpoints")
+    parser.add_argument("--packing", default=0, type=int, choices=[0, 1], help="Sequence packing : blocs pleins sans padding (0=non, 1=oui)")
+    parser.add_argument("--max_tokens", default=0, type=int, help="Budget de tokens traités (batch_size*max_seq_len par step) ; 0 = epochs complètes")
+    parser.add_argument("--val_docs", default=2000, type=int, help="Nb de documents (fin du fichier) réservés à la validation ; 0 = pas de validation")
+    parser.add_argument("--eval_interval", default=500, type=int, help="Intervalle (steps) d'évaluation de la val_loss")
+    parser.add_argument("--use_mlflow", action="store_true", help="Logger params/métriques dans MLflow")
+    parser.add_argument("--mlflow_uri", type=str, default="https://mlflow.tgu.ovh", help="URI du serveur MLflow")
+    parser.add_argument("--mlflow_experiment", type=str, default="minimind-pretrain", help="Nom de l'expérience MLflow")
+    parser.add_argument("--run_name", type=str, default=None, help="Nom du run MLflow")
     args = parser.parse_args()
 
     # ========== 1. 初始化环境和随机种子 ==========
@@ -105,13 +146,14 @@ if __name__ == "__main__":
     
     # ========== 2. 配置目录、模型参数、检查ckp ==========
     os.makedirs(args.save_dir, exist_ok=True)
-    lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=bool(args.use_moe))
+    arch_overrides = {k: getattr(args, k) for k in ('num_attention_heads', 'num_key_value_heads', 'intermediate_size') if getattr(args, k) is not None}
+    lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=bool(args.use_moe), **arch_overrides)
     ckp_data = lm_checkpoint(lm_config, weight=args.save_weight, save_dir='../checkpoints') if args.from_resume==1 else None
     
     # ========== 3. 设置混合精度 ==========
     device_type = "cuda" if "cuda" in args.device else "cpu"
     dtype = torch.bfloat16 if args.dtype == "bfloat16" else torch.float16
-    autocast_ctx = nullcontext() if device_type == "cpu" else torch.cuda.amp.autocast(dtype=dtype)
+    autocast_ctx = nullcontext() if device_type == "cpu" else torch.amp.autocast('cuda', dtype=dtype)
     
     # ========== 4. 配wandb ==========
     wandb = None
@@ -124,11 +166,38 @@ if __name__ == "__main__":
     
     # ========== 5. 定义模型、数据、优化器 ==========
     model, tokenizer = init_model(lm_config, args.from_weight, device=args.device)
-    train_ds = PretrainDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
+    raw_ds = load_dataset('json', data_files=args.data_path, split='train')
+    # split train/val ALÉATOIRE (seed fixe) : le fichier est trié par source (ex. QCM anglais à la fin)
+    val_idx = set(random.Random(0).sample(range(len(raw_ds)), args.val_docs))
+    train_idx = [i for i in range(len(raw_ds)) if i not in val_idx]
+    if args.packing:
+        train_ds = PackedPretrainDataset(raw_ds.select(train_idx), tokenizer, args.max_seq_len, cache_path=f'{args.data_path}.train_rand{args.val_docs}.npy')
+    else:
+        train_ds = PretrainDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
+        train_ds.samples = train_ds.samples.select(train_idx)
+    val_loader = None
+    if args.val_docs > 0:
+        val_ds = PackedPretrainDataset(raw_ds.select(sorted(val_idx)), tokenizer, args.max_seq_len, cache_path=f'{args.data_path}.val_rand{args.val_docs}.npy')
+        val_loader = DataLoader(val_ds, batch_size=args.batch_size)
+    tokens_per_step = args.batch_size * args.max_seq_len
+    steps_per_epoch = (len(train_ds) + args.batch_size - 1) // args.batch_size
+    total_steps = args.epochs * steps_per_epoch
+    if args.max_tokens > 0: total_steps = min(total_steps, args.max_tokens // tokens_per_step)
+    Logger(f'train: {len(train_ds)} séquences, total_steps: {total_steps} (~{total_steps * tokens_per_step / 1e6:.0f}M tokens)')
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
-    scaler = torch.cuda.amp.GradScaler(enabled=(args.dtype == 'float16'))
-    optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate)
+    scaler = torch.amp.GradScaler('cuda', enabled=(args.dtype == 'float16'))
+    decay = [p for p in model.parameters() if p.dim() >= 2]
+    no_decay = [p for p in model.parameters() if p.dim() < 2]
+    optimizer = optim.AdamW([{'params': decay, 'weight_decay': args.weight_decay}, {'params': no_decay, 'weight_decay': 0.0}], lr=args.learning_rate)
     
+    mlflow = None
+    if args.use_mlflow and is_main_process():
+        import mlflow
+        mlflow.set_tracking_uri(args.mlflow_uri)
+        mlflow.set_experiment(args.mlflow_experiment)
+        mlflow.start_run(run_name=args.run_name)
+        mlflow.log_params({**vars(args), "params_M": round(sum(p.numel() for p in model.parameters()) / 1e6, 3), "total_steps": total_steps})
+
     # ========== 6. 从ckp恢复状态 ==========
     start_epoch, start_step = 0, 0
     if ckp_data:
@@ -154,9 +223,11 @@ if __name__ == "__main__":
         loader = DataLoader(train_ds, batch_sampler=batch_sampler, num_workers=args.num_workers, pin_memory=True)
         if skip > 0: 
             Logger(f'Epoch [{epoch + 1}/{args.epochs}]: 跳过前{start_step}个step，从step {start_step + 1}开始')
-            train_epoch(epoch, loader, len(loader) + skip, start_step, wandb)
+            done = train_epoch(epoch, loader, len(loader) + skip, start_step, wandb)
         else:
-            train_epoch(epoch, loader, len(loader), 0, wandb)
+            done = train_epoch(epoch, loader, len(loader), 0, wandb)
+        if done: break
+    if mlflow: mlflow.end_run()
     
     # ========== 9. 清理分布进程 ==========
     if dist.is_initialized():

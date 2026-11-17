@@ -3,6 +3,7 @@ import torch
 import json
 import os
 import random
+import numpy as np
 from datasets import load_dataset, Features, Sequence, Value
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -57,6 +58,31 @@ class PretrainDataset(Dataset):
         labels[input_ids == self.tokenizer.pad_token_id] = -100
         return input_ids, labels
 
+
+class PackedPretrainDataset(Dataset):
+    """Sequence packing : concatène BOS+texte+EOS de tous les documents puis découpe en blocs
+    pleins de max_length tokens (aucun padding → 100% des tokens calculés sont appris).
+    Simplification usuelle : un bloc peut contenir la fin d'un document et le début du suivant.
+    Les tokens sont mis en cache (.npy, uint16 car vocab < 65536) pour ne tokenizer qu'une fois."""
+    def __init__(self, samples, tokenizer, max_length=512, cache_path=None):
+        super().__init__()
+        self.max_length = max_length
+        if cache_path and os.path.exists(cache_path):
+            self.tokens = np.load(cache_path, mmap_mode='r')
+            return
+        bos, eos = tokenizer.bos_token_id, tokenizer.eos_token_id
+        encode = lambda b: {'ids': [[bos] + ids + [eos] for ids in tokenizer([str(t) for t in b['text']], add_special_tokens=False).input_ids]}
+        tokenized = samples.map(encode, batched=True, num_proc=8, remove_columns=samples.column_names)
+        self.tokens = np.concatenate([np.concatenate(b['ids']).astype(np.uint16) for b in tokenized.iter(batch_size=10000)])
+        if cache_path: np.save(cache_path, self.tokens)
+
+    def __len__(self):
+        return len(self.tokens) // self.max_length
+
+    def __getitem__(self, index):
+        block = self.tokens[index * self.max_length:(index + 1) * self.max_length]
+        input_ids = torch.from_numpy(block.astype(np.int64))
+        return input_ids, input_ids.clone()
 
 class SFTDataset(Dataset):
     def __init__(self, jsonl_path, tokenizer, max_length=1024):
