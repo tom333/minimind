@@ -1,0 +1,8 @@
+# Batch effectif = batch_size(32) x accumulation_steps séquences de 340 tokens
+# acc8 = 256 séq (~87k tokens, ~574 mises à jour sur 50M tokens) ; acc2 = 64 séq (~2300 mises à jour)
+acc8-s42 --accumulation_steps 8 --seed 42
+acc8-s2  --accumulation_steps 8 --seed 2
+acc4-s42 --accumulation_steps 4 --seed 42
+acc4-s2  --accumulation_steps 4 --seed 2
+acc2-s42 --accumulation_steps 2 --seed 42
+acc2-s2  --accumulation_steps 2 --seed 2
