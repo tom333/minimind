@@ -1,4 +1,5 @@
 """Attention multi-têtes avec GQA, RoPE, QK-norm, masque causal et KV-cache."""
+
 import math
 
 import torch
@@ -116,10 +117,12 @@ class Attention(nn.Module):
             xv = torch.cat([past_key_value[1], xv], dim=1)
         past_kv = (xk, xv) if use_cache else None
         # repeat_kv 4→8 têtes, puis transpose → [batch, têtes, seq, head_dim] = [1, 8, 10, 96]
+        # .contiguous() : avec 1 seule tête K/V (n_rep=8), l'expand de repeat_kv donne une disposition
+        # mémoire que le backward compilé de Flash Attention rejette (bug torch.compile). Mêmes valeurs.
         xq, xk, xv = (
             xq.transpose(1, 2),
-            repeat_kv(xk, self.n_rep).transpose(1, 2),
-            repeat_kv(xv, self.n_rep).transpose(1, 2),
+            repeat_kv(xk, self.n_rep).transpose(1, 2).contiguous(),
+            repeat_kv(xv, self.n_rep).transpose(1, 2).contiguous(),
         )
         # Chemin rapide : Flash Attention (kernel GPU optimisé, même calcul, ne matérialise
         # pas la matrice seq×seq). Utilisé si pas de cache ni de padding.

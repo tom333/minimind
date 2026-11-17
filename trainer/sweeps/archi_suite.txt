@@ -1,0 +1,4 @@
+# Suite du sweep d'architecture (kv1 avait planté : bug torch.compile corrigé par .contiguous())
+kv1           --optimizer muon --muon_lr 0.01 --num_key_value_heads 1
+kv8           --optimizer muon --muon_lr 0.01 --num_key_value_heads 8
+moe4x1        --optimizer muon --muon_lr 0.01 --use_moe 1

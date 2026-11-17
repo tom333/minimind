@@ -17,6 +17,6 @@ grep -vE '^\s*(#|$)' "sweeps/$name.txt" | while read -r run extra; do
     --packing 1 --use_compile 1 --save_resume 0 --eval_interval 250 --log_interval 50 \
     --save_dir "$out" --save_weight "pretrain_$run" \
     --use_mlflow --mlflow_experiment "minimind-$name" --run_name "$run" \
-    $extra > "$out/$run.log" 2>&1 < /dev/null
+    $extra > "$out/$run.log" 2>&1 < /dev/null || echo "ÉCHEC du run $run (voir $out/$run.log)"
   grep "val_loss" "$out/$run.log" | tail -1
 done
