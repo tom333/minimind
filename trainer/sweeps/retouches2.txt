@@ -1,0 +1,5 @@
+# Ablation : softcap + zero-init SANS WSD (cosinus). Base : batch 64 x 1 (équivalent à 32 x 2, +6 % de débit)
+# Références Muon 0.01 en 32 x 2 : 2.347 (s42) / 2.340 (s2)
+ref64-s42      --optimizer muon --muon_lr 0.01 --seed 42
+sc-zi-s42      --optimizer muon --muon_lr 0.01 --logit_softcap 30 --zero_init 1 --seed 42
+sc-zi-s2       --optimizer muon --muon_lr 0.01 --logit_softcap 30 --zero_init 1 --seed 2
