@@ -1,0 +1,3 @@
+# Petites retouches, testées en lot. Référence (Muon 0.01, cosinus) : 2.347 (s42) / 2.340 (s2)
+lot-s42 --optimizer muon --muon_lr 0.01 --lr_schedule wsd --logit_softcap 30 --zero_init 1 --seed 42
+lot-s2  --optimizer muon --muon_lr 0.01 --lr_schedule wsd --logit_softcap 30 --zero_init 1 --seed 2

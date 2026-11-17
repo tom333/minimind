@@ -42,8 +42,11 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
         input_ids = input_ids.to(args.device)
         labels = labels.to(args.device)
         warmup_steps = int(args.warmup_ratio * total_steps)
+        decay_start = int((1 - args.decay_ratio) * total_steps)
         if global_step < warmup_steps:
             lr = args.learning_rate * global_step / warmup_steps
+        elif args.lr_schedule == 'wsd':  # Warmup-Stable-Decay : plateau puis décroissance linéaire vers 0
+            lr = args.learning_rate * min(1.0, (total_steps - global_step) / max(total_steps - decay_start, 1))
         else:
             lr = get_lr(global_step - warmup_steps, total_steps - warmup_steps, args.learning_rate)
         for opt in optimizers:
@@ -130,6 +133,10 @@ if __name__ == "__main__":
     parser.add_argument("--num_key_value_heads", default=None, type=int, help="Nb de têtes K/V, GQA (défaut config)")
     parser.add_argument("--intermediate_size", default=None, type=int, help="Largeur interne du FFN (défaut config)")
     parser.add_argument("--save_resume", default=1, type=int, choices=[0, 1], help="Écrire le checkpoint de reprise (modèle+optimiseur, ~750Mo) dans ../checkpoints")
+    parser.add_argument("--lr_schedule", default="cosine", choices=["cosine", "wsd"], help="cosine (d'origine) ou wsd : warmup, plateau, décroissance linéaire finale")
+    parser.add_argument("--decay_ratio", default=0.2, type=float, help="WSD : part finale des steps en décroissance linéaire")
+    parser.add_argument("--logit_softcap", default=0.0, type=float, help="Softcap des logits (0 = désactivé, 30 = valeur usuelle)")
+    parser.add_argument("--zero_init", default=0, type=int, choices=[0, 1], help="Initialise o_proj et down_proj à 0 (chaque bloc démarre comme l'identité)")
     parser.add_argument("--optimizer", default="adamw", choices=["adamw", "muon"], help="muon = Muon pour les matrices des blocs + AdamW pour le reste")
     parser.add_argument("--muon_lr", default=0.02, type=float, help="LR de pointe de Muon (suit le même warmup/cosinus que l'AdamW)")
     parser.add_argument("--packing", default=0, type=int, choices=[0, 1], help="Sequence packing : blocs pleins sans padding (0=non, 1=oui)")
@@ -150,6 +157,7 @@ if __name__ == "__main__":
     # ========== 2. 配置目录、模型参数、检查ckp ==========
     os.makedirs(args.save_dir, exist_ok=True)
     arch_overrides = {k: getattr(args, k) for k in ('num_attention_heads', 'num_key_value_heads', 'intermediate_size') if getattr(args, k) is not None}
+    if args.logit_softcap: arch_overrides['logit_softcap'] = args.logit_softcap
     lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=bool(args.use_moe), **arch_overrides)
     ckp_data = lm_checkpoint(lm_config, weight=args.save_weight, save_dir='../checkpoints') if args.from_resume==1 else None
     
@@ -189,6 +197,9 @@ if __name__ == "__main__":
     Logger(f'train: {len(train_ds)} séquences, total_steps: {total_steps} (~{total_steps * tokens_per_step / 1e6:.0f}M tokens)')
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
     scaler = torch.amp.GradScaler('cuda', enabled=(args.dtype == 'float16'))
+    if args.zero_init:  # sortie de chaque sous-bloc nulle au départ : h + 0 = h
+        for n, p in model.named_parameters():
+            if n.endswith(('o_proj.weight', 'down_proj.weight')): torch.nn.init.zeros_(p)
     # Muon : matrices des blocs (q/k/v/o, gate/up/down) ; AdamW : embedding (partagé avec lm_head) et normes
     muon_params = [p for n, p in model.named_parameters() if args.optimizer == 'muon' and p.dim() == 2 and 'embed_tokens' not in n]
     muon_ids = {id(p) for p in muon_params}

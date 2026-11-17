@@ -65,3 +65,6 @@ class MiniMindConfig(PretrainedConfig):
         )
         self.norm_topk_prob = kwargs.get("norm_topk_prob", True)
         self.router_aux_loss_coef = kwargs.get("router_aux_loss_coef", 5e-4)
+        # Logit softcap (Gemma 2, speedrun) : logits = cap·tanh(logits/cap), borne les scores de sortie.
+        # 0 = désactivé (comportement d'origine)
+        self.logit_softcap = kwargs.get("logit_softcap", 0.0)

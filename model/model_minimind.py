@@ -207,6 +207,10 @@ class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
             else logits_to_keep
         )
         logits = self.lm_head(hidden_states[:, slice_indices, :])
+        # softcap : tanh écrase en douceur les scores extrêmes vers ±cap (aucun effet sur les petits)
+        cap = getattr(self.config, "logit_softcap", 0.0)
+        if cap:
+            logits = cap * torch.tanh(logits / cap)
         loss = None
         # LOSS = cœur de l'entraînement : prédire le token SUIVANT (décalage d'une position).
         #   phrase [Le, chat, dort] : sortie@"Le" doit prédire "chat", sortie@"chat" → "dort".
