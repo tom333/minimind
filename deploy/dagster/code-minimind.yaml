@@ -1,0 +1,59 @@
+# Serveur de code Dagster de minimind, à déclarer dans le workspace du Dagster partagé
+# (my-kluster/argocd/argocd-apps/dagster.yaml). Les runs sont lancés par le K8sRunLauncher
+# dans le namespace dagster avec cette image ; la demande de GPU, la priorité et les volumes
+# sont portés par les tags du job (orchestration/definitions.py).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dagster-code-minimind
+  namespace: dagster
+  labels:
+    app: dagster-user-code
+    component: minimind
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dagster-user-code
+      component: minimind
+  template:
+    metadata:
+      labels:
+        app: dagster-user-code
+        component: minimind
+    spec:
+      containers:
+        - name: user-code
+          image: localhost:32000/minimind-dagster:latest
+          imagePullPolicy: Always
+          ports:
+            - name: grpc
+              containerPort: 4000
+          env:
+            - name: DAGSTER_CURRENT_IMAGE
+              value: localhost:32000/minimind-dagster:latest
+          readinessProbe:
+            exec:
+              command: ["dagster", "api", "grpc-health-check", "-p", "4000"]
+            periodSeconds: 20
+            timeoutSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 384Mi
+            limits:
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dagster-code-minimind
+  namespace: dagster
+spec:
+  selector:
+    app: dagster-user-code
+    component: minimind
+  ports:
+    - name: grpc
+      port: 4000
+      targetPort: 4000

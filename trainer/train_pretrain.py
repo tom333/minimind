@@ -147,7 +147,7 @@ if __name__ == "__main__":
     parser.add_argument("--val_docs", default=2000, type=int, help="Nb de documents (fin du fichier) réservés à la validation ; 0 = pas de validation")
     parser.add_argument("--eval_interval", default=500, type=int, help="Intervalle (steps) d'évaluation de la val_loss")
     parser.add_argument("--use_mlflow", action="store_true", help="Logger params/métriques dans MLflow")
-    parser.add_argument("--mlflow_uri", type=str, default="https://mlflow.tgu.ovh", help="URI du serveur MLflow")
+    parser.add_argument("--mlflow_uri", type=str, default=os.environ.get("MLFLOW_TRACKING_URI", "https://mlflow.tgu.ovh"), help="URI du serveur MLflow")
     parser.add_argument("--mlflow_experiment", type=str, default="minimind-pretrain", help="Nom de l'expérience MLflow")
     parser.add_argument("--run_name", type=str, default=None, help="Nom du run MLflow")
     args = parser.parse_args()

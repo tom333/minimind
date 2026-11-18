@@ -1,0 +1,10 @@
+# Dépendances de l'image d'entraînement + orchestration (torch est installé à part, index CUDA)
+transformers==4.57.6
+datasets==3.6.0
+numpy==1.26.4
+mlflow-skinny==3.12.0
+optuna==5.1.0
+pyyaml
+dagster==1.13.30
+dagster-k8s==0.29.30
+dagster-postgres==0.29.30

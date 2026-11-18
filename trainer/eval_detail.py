@@ -20,7 +20,8 @@ import torch
 import torch.nn.functional as F
 
 DATA = os.path.join(
-    os.path.dirname(__file__), "..", "dataset", "pretrain_t2t_mini.jsonl"
+    os.environ.get("MINIMIND_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "dataset")),
+    "pretrain_t2t_mini.jsonl",
 )
 N_DOCS, VAL_DOCS, SEQ, BOS = 1_270_238, 2000, 340, 1
 # Sources repérées par scripts/analyze_data.py : (dernier index de document exclu, nom)
