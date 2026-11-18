@@ -78,6 +78,7 @@ def run_trial(trial, study_cfg, base):
         name,
     ]
     cmd += [x for k, v in args.items() for x in (f"--{k}", str(v))]
+    cmd += ["--mlflow_uri", os.environ.get("MINIMIND_MLFLOW_URI", "https://mlflow.tgu.ovh")]
     if "MINIMIND_DATA_DIR" in os.environ and "data_path" not in args:  # dans le cluster : corpus monté
         cmd += ["--data_path", os.path.join(os.environ["MINIMIND_DATA_DIR"], "pretrain_t2t_mini.jsonl")]
     trial.set_user_attr("args", args)

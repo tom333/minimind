@@ -28,9 +28,9 @@ RUN uv pip install -r deploy/requirements.txt
 # Cache Hugging Face dans le stockage éphémère du pod (hors du disque /data, souvent plein).
 ENV PYTHONPATH=/app \
     HF_HOME=/tmp/huggingface \
-    MLFLOW_TRACKING_URI=https://mlflow.tgu.ovh
-# (MLflow refuse le nom de service interne : "Invalid Host header", d'où l'adresse publique.
-#  Redéfinie ici plutôt que dans le premier ENV pour ne pas reconstruire la couche PyTorch.)
+    MINIMIND_MLFLOW_URI=https://mlflow.tgu.ovh
+# MLflow n'accepte que son nom public (--allowed-hosts). MLFLOW_TRACKING_URI ne convient pas :
+# le run launcher Dagster l'impose à tous les runs avec le nom de service interne, qui est refusé.
 COPY model model
 COPY dataset/__init__.py dataset/lm_dataset.py dataset/
 COPY trainer trainer
