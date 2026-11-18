@@ -25,9 +25,9 @@ RUN uv pip install -r deploy/requirements.txt
 
 # Dagster retire le répertoire de travail de sys.path après avoir chargé le code : sans
 # PYTHONPATH, les imports faits pendant un run (trainer.study) échouent.
-# Cache Hugging Face (corpus converti en Arrow) sur le volume de sorties : conservé entre les runs.
+# Cache Hugging Face dans le stockage éphémère du pod (hors du disque /data, souvent plein).
 ENV PYTHONPATH=/app \
-    HF_HOME=/data/out/.cache/huggingface
+    HF_HOME=/tmp/huggingface
 COPY model model
 COPY dataset/__init__.py dataset/lm_dataset.py dataset/
 COPY trainer trainer
