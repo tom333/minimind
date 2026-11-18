@@ -1,5 +1,4 @@
 """FFN SwiGLU (dense ou à matrices structurées BTT) et Mixture of Experts."""
-import math
 
 import torch
 import torch.nn.functional as F

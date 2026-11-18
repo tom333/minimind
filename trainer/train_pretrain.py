@@ -139,6 +139,9 @@ if __name__ == "__main__":
     parser.add_argument("--zero_init", default=0, type=int, choices=[0, 1], help="Initialise o_proj et down_proj à 0 (chaque bloc démarre comme l'identité)")
     parser.add_argument("--ffn_btt_rank", default=0, type=int, help="FFN à matrices structurées BTT de ce rang (0 = matrices pleines)")
     parser.add_argument("--ffn_btt_mid", default="128,64", type=str, help="Factorisation m1,m2 de la largeur interne du FFN structuré (m1*m2)")
+    parser.add_argument("--memory_layers", default="", type=str, help="Blocs recevant une couche mémoire, ex. '4' ou '2,5' (vide = aucune)")
+    parser.add_argument("--memory_keys", default=256, type=int, help="Nb de sous-clés par moitié (table de memory_keys² lignes)")
+    parser.add_argument("--memory_lr_ratio", default=1.0, type=float, help="Multiplicateur du LR AdamW pour la table et les clés de la mémoire")
     parser.add_argument("--detailed_eval", default=0, type=int, choices=[0, 1], help="Évaluation détaillée en fin de run (par source, par fréquence de token)")
     parser.add_argument("--optimizer", default="adamw", choices=["adamw", "muon"], help="muon = Muon pour les matrices des blocs + AdamW pour le reste")
     parser.add_argument("--muon_lr", default=0.02, type=float, help="LR de pointe de Muon (suit le même warmup/cosinus que l'AdamW)")
@@ -161,6 +164,7 @@ if __name__ == "__main__":
     os.makedirs(args.save_dir, exist_ok=True)
     arch_overrides = {k: getattr(args, k) for k in ('num_attention_heads', 'num_key_value_heads', 'intermediate_size') if getattr(args, k) is not None}
     if args.logit_softcap: arch_overrides['logit_softcap'] = args.logit_softcap
+    if args.memory_layers: arch_overrides.update(memory_layers=tuple(int(v) for v in args.memory_layers.split(',')), memory_keys=args.memory_keys)
     if args.ffn_btt_rank: arch_overrides.update(ffn_btt_rank=args.ffn_btt_rank, ffn_btt_mid=tuple(int(v) for v in args.ffn_btt_mid.split(',')))
     lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=bool(args.use_moe), **arch_overrides)
     ckp_data = lm_checkpoint(lm_config, weight=args.save_weight, save_dir='../checkpoints') if args.from_resume==1 else None
@@ -205,13 +209,14 @@ if __name__ == "__main__":
         for n, p in model.named_parameters():
             if n.endswith(('o_proj.weight', 'down_proj.weight')): torch.nn.init.zeros_(p)
     # Muon : matrices des blocs (q/k/v/o, gate/up/down) ; AdamW : embedding (partagé avec lm_head) et normes
-    muon_params = [p for n, p in model.named_parameters() if args.optimizer == 'muon' and p.dim() == 2 and 'embed_tokens' not in n]
+    mem_params = [p for n, p in model.named_parameters() if 'mem_' in n]  # table et clés de la mémoire : AdamW, sans decay
+    muon_params = [p for n, p in model.named_parameters() if args.optimizer == 'muon' and p.dim() == 2 and 'embed_tokens' not in n and 'mem_' not in n]
     # noyaux 3D des matrices structurées (BTT) : Muon appliqué bloc par bloc (trainer/muon.py)
     core_params = [p for p in model.parameters() if args.optimizer == 'muon' and p.dim() == 3]
-    muon_ids = {id(p) for p in muon_params + core_params}
+    muon_ids = {id(p) for p in muon_params + core_params + mem_params}
     decay = [p for p in model.parameters() if p.dim() >= 2 and id(p) not in muon_ids]
     no_decay = [p for p in model.parameters() if p.dim() < 2]
-    optimizer = optim.AdamW([{'params': decay, 'weight_decay': args.weight_decay}, {'params': no_decay, 'weight_decay': 0.0}], lr=args.learning_rate)
+    optimizer = optim.AdamW([{'params': decay, 'weight_decay': args.weight_decay}, {'params': no_decay, 'weight_decay': 0.0}] + ([{'params': mem_params, 'weight_decay': 0.0, 'lr_ratio': args.memory_lr_ratio}] if mem_params else []), lr=args.learning_rate)
     optimizers = [optimizer]
     if args.optimizer == 'muon':
         assert not args.save_resume, "--save_resume non supporté avec Muon (un seul état d'optimiseur sauvegardé)"

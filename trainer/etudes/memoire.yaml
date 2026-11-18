@@ -1,0 +1,24 @@
+# Couche mémoire à clés produit (model/memory.py) : +50,9M paramètres dans une table de 65 536 lignes,
+# consultée par chaque token au bloc 4, pour presque aucun calcul supplémentaire.
+# Repère sans mémoire, même recette et même seed : val_loss 2.338, tokens rares 3.343 (sweep btt, ref-s2).
+name: memoire
+sampler: grid
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  seed: 2
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  memory_layers: "4"
+space:
+  memory_lr_ratio: [1, 10]

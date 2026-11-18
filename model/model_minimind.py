@@ -7,6 +7,7 @@ from transformers.modeling_outputs import MoeCausalLMOutputWithPast
 from .attention import Attention, repeat_kv  # noqa: F401  (ré-exportés)
 from .config import MiniMindConfig
 from .feedforward import FeedForward, MOEFeedForward
+from .memory import MemoryLayer
 from .norm import RMSNorm
 from .rope import apply_rotary_pos_emb, precompute_freqs_cis  # noqa: F401
 
@@ -57,6 +58,8 @@ class MiniMindBlock(nn.Module):
             config.hidden_size, eps=config.rms_norm_eps
         )
         self.mlp = FeedForward(config) if not config.use_moe else MOEFeedForward(config)
+        # couche mémoire optionnelle, en parallèle du FFN (même entrée normalisée, sortie ajoutée)
+        self.memory = MemoryLayer(config) if layer_id in getattr(config, "memory_layers", ()) else None
 
     def forward(
         self,
@@ -75,9 +78,11 @@ class MiniMindBlock(nn.Module):
             attention_mask,
         )
         hidden_states += residual  # résiduel après attention
-        hidden_states = hidden_states + self.mlp(
-            self.post_attention_layernorm(hidden_states)
-        )  # résiduel après MLP
+        normed = self.post_attention_layernorm(hidden_states)
+        update = self.mlp(normed)
+        if self.memory is not None:
+            update = update + self.memory(normed)
+        hidden_states = hidden_states + update  # résiduel après MLP (+ mémoire)
         return hidden_states, present_key_value
 
 

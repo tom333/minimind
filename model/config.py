@@ -73,3 +73,10 @@ class MiniMindConfig(PretrainedConfig):
         self.ffn_btt_rank = kwargs.get("ffn_btt_rank", 0)
         self.ffn_btt_hidden = kwargs.get("ffn_btt_hidden", (32, 24))
         self.ffn_btt_mid = kwargs.get("ffn_btt_mid", (128, 64))
+        # Couche mémoire à clés produit (cf. memory.MemoryLayer) ajoutée dans les blocs listés.
+        # () = aucune (origine). Table de memory_keys² lignes × hidden_size.
+        self.memory_layers = tuple(kwargs.get("memory_layers", ()))
+        self.memory_keys = kwargs.get("memory_keys", 256)
+        self.memory_k = kwargs.get("memory_k", 8)
+        self.memory_heads = kwargs.get("memory_heads", 2)
+        self.memory_query_dim = kwargs.get("memory_query_dim", 256)
