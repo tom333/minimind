@@ -68,3 +68,8 @@ class MiniMindConfig(PretrainedConfig):
         # Logit softcap (Gemma 2, speedrun) : logits = cap·tanh(logits/cap), borne les scores de sortie.
         # 0 = désactivé (comportement d'origine)
         self.logit_softcap = kwargs.get("logit_softcap", 0.0)
+        # FFN à matrices structurées BTT (cf. feedforward.BTTLinear). rang 0 = matrices pleines (origine).
+        # hidden_size = h1*h2 et largeur interne du FFN = m1*m2.
+        self.ffn_btt_rank = kwargs.get("ffn_btt_rank", 0)
+        self.ffn_btt_hidden = kwargs.get("ffn_btt_hidden", (32, 24))
+        self.ffn_btt_mid = kwargs.get("ffn_btt_mid", (128, 64))

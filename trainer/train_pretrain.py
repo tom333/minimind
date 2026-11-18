@@ -137,6 +137,9 @@ if __name__ == "__main__":
     parser.add_argument("--decay_ratio", default=0.2, type=float, help="WSD : part finale des steps en décroissance linéaire")
     parser.add_argument("--logit_softcap", default=0.0, type=float, help="Softcap des logits (0 = désactivé, 30 = valeur usuelle)")
     parser.add_argument("--zero_init", default=0, type=int, choices=[0, 1], help="Initialise o_proj et down_proj à 0 (chaque bloc démarre comme l'identité)")
+    parser.add_argument("--ffn_btt_rank", default=0, type=int, help="FFN à matrices structurées BTT de ce rang (0 = matrices pleines)")
+    parser.add_argument("--ffn_btt_mid", default="128,64", type=str, help="Factorisation m1,m2 de la largeur interne du FFN structuré (m1*m2)")
+    parser.add_argument("--detailed_eval", default=0, type=int, choices=[0, 1], help="Évaluation détaillée en fin de run (par source, par fréquence de token)")
     parser.add_argument("--optimizer", default="adamw", choices=["adamw", "muon"], help="muon = Muon pour les matrices des blocs + AdamW pour le reste")
     parser.add_argument("--muon_lr", default=0.02, type=float, help="LR de pointe de Muon (suit le même warmup/cosinus que l'AdamW)")
     parser.add_argument("--packing", default=0, type=int, choices=[0, 1], help="Sequence packing : blocs pleins sans padding (0=non, 1=oui)")
@@ -158,6 +161,7 @@ if __name__ == "__main__":
     os.makedirs(args.save_dir, exist_ok=True)
     arch_overrides = {k: getattr(args, k) for k in ('num_attention_heads', 'num_key_value_heads', 'intermediate_size') if getattr(args, k) is not None}
     if args.logit_softcap: arch_overrides['logit_softcap'] = args.logit_softcap
+    if args.ffn_btt_rank: arch_overrides.update(ffn_btt_rank=args.ffn_btt_rank, ffn_btt_mid=tuple(int(v) for v in args.ffn_btt_mid.split(',')))
     lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=bool(args.use_moe), **arch_overrides)
     ckp_data = lm_checkpoint(lm_config, weight=args.save_weight, save_dir='../checkpoints') if args.from_resume==1 else None
     
@@ -202,7 +206,9 @@ if __name__ == "__main__":
             if n.endswith(('o_proj.weight', 'down_proj.weight')): torch.nn.init.zeros_(p)
     # Muon : matrices des blocs (q/k/v/o, gate/up/down) ; AdamW : embedding (partagé avec lm_head) et normes
     muon_params = [p for n, p in model.named_parameters() if args.optimizer == 'muon' and p.dim() == 2 and 'embed_tokens' not in n]
-    muon_ids = {id(p) for p in muon_params}
+    # noyaux 3D des matrices structurées (BTT) : Muon appliqué bloc par bloc (trainer/muon.py)
+    core_params = [p for p in model.parameters() if args.optimizer == 'muon' and p.dim() == 3]
+    muon_ids = {id(p) for p in muon_params + core_params}
     decay = [p for p in model.parameters() if p.dim() >= 2 and id(p) not in muon_ids]
     no_decay = [p for p in model.parameters() if p.dim() < 2]
     optimizer = optim.AdamW([{'params': decay, 'weight_decay': args.weight_decay}, {'params': no_decay, 'weight_decay': 0.0}], lr=args.learning_rate)
@@ -210,7 +216,10 @@ if __name__ == "__main__":
     if args.optimizer == 'muon':
         assert not args.save_resume, "--save_resume non supporté avec Muon (un seul état d'optimiseur sauvegardé)"
         optimizers.append(torch.optim.Muon([{'params': muon_params, 'lr_ratio': args.muon_lr / args.learning_rate}], lr=args.muon_lr, weight_decay=args.weight_decay))
-        Logger(f'Muon : {sum(p.numel() for p in muon_params) / 1e6:.1f}M params ; AdamW : {sum(p.numel() for p in decay + no_decay) / 1e6:.1f}M params')
+        if core_params:
+            from trainer.muon import MuonAdamW
+            optimizers.append(MuonAdamW([{'params': core_params, 'use_muon': True, 'lr_ratio': args.muon_lr / args.learning_rate, 'weight_decay': args.weight_decay, 'lr': args.muon_lr}]))
+        Logger(f'Muon : {sum(p.numel() for p in muon_params) / 1e6:.1f}M params (+ {sum(p.numel() for p in core_params) / 1e6:.1f}M en noyaux BTT) ; AdamW : {sum(p.numel() for p in decay + no_decay) / 1e6:.1f}M params')
     
     mlflow = None
     if args.use_mlflow and is_main_process():
@@ -249,6 +258,11 @@ if __name__ == "__main__":
         else:
             done = train_epoch(epoch, loader, len(loader), 0, wandb)
         if done: break
+    if args.detailed_eval and is_main_process():
+        from trainer.eval_detail import detailed_eval, format_metrics
+        metrics = detailed_eval(getattr(model, '_orig_mod', model), args.device)
+        Logger(format_metrics(metrics))
+        if mlflow: mlflow.log_metrics({f'final_{k}': v for k, v in metrics.items()})
     if mlflow: mlflow.end_run()
     
     # ========== 9. 清理分布进程 ==========

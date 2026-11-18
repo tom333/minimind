@@ -1,0 +1,5 @@
+# Piste 1 : FFN à matrices structurées (BTT), mêmes paramètres et même calcul théorique, FFN plus large.
+# Référence dense (Muon 0.01, batch 64) : 2.350 (s42). ref-s2 refait une référence avec l'évaluation détaillée.
+ref-s2      --optimizer muon --muon_lr 0.01 --seed 2
+btt2x-s42   --optimizer muon --muon_lr 0.01 --ffn_btt_rank 9 --ffn_btt_mid 76,64
+btt4x-s42   --optimizer muon --muon_lr 0.01 --ffn_btt_rank 6 --ffn_btt_mid 128,64

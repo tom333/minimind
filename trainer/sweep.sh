@@ -14,7 +14,7 @@ grep -vE '^\s*(#|$)' "sweeps/$name.txt" | while read -r run extra; do
   # shellcheck disable=SC2086
   ../.venv/bin/python train_pretrain.py \
     --learning_rate 7e-4 --warmup_ratio 0.02 --weight_decay 0.1 --batch_size 64 --accumulation_steps 1 --max_tokens 50000000 \
-    --packing 1 --use_compile 1 --save_resume 0 --eval_interval 250 --log_interval 50 \
+    --packing 1 --use_compile 1 --save_resume 0 --detailed_eval 1 --eval_interval 250 --log_interval 50 \
     --save_dir "$out" --save_weight "pretrain_$run" \
     --use_mlflow --mlflow_experiment "minimind-$name" --run_name "$run" \
     $extra > "$out/$run.log" 2>&1 < /dev/null || echo "ÉCHEC du run $run (voir $out/$run.log)"

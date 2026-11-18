@@ -32,17 +32,17 @@ def zeropower_newtonschulz(G, steps=5, eps=1e-7):
     """Approche U Vᵀ (G = U S Vᵀ) par itération de Newton-Schulz quintique.
     Résultat ≈ U S' Vᵀ avec S' ∈ [0.5, 1.5] au lieu de 1 exactement : suffisant en pratique."""
     a, b, c = NS_COEFFS
-    X = G.bfloat16()
-    transposed = X.size(0) > X.size(1)
+    X = G.bfloat16()  # G : [lignes, colonnes] ou un lot de matrices [bloc, lignes, colonnes]
+    transposed = X.size(-2) > X.size(-1)
     if transposed:
-        X = X.T  # travailler sur la forme "large" (moins cher)
-    X = X / (X.norm() + eps)  # valeurs singulières ≤ 1 pour que l'itération converge
+        X = X.mT  # travailler sur la forme "large" (moins cher)
+    X = X / (X.norm(dim=(-2, -1), keepdim=True) + eps)  # valeurs singulières ≤ 1 pour que l'itération converge
     for _ in range(steps):
-        A = X @ X.T
+        A = X @ X.mT
         X = (
             a * X + (b * A + c * A @ A) @ X
         )  # polynôme impair en X : pousse chaque σ vers ~1
-    return X.T if transposed else X
+    return X.mT if transposed else X
 
 
 class MuonAdamW(Optimizer):
@@ -76,7 +76,7 @@ class MuonAdamW(Optimizer):
         update = p.grad.add(buf, alpha=g["momentum"])  # Nesterov : g + μB
         O = zeropower_newtonschulz(update)
         lr = g["lr"] * math.sqrt(
-            max(1, p.size(0) / p.size(1))
+            max(1, p.size(-2) / p.size(-1))
         )  # matrices rectangulaires : même échelle
         p.mul_(1 - g["lr"] * g["weight_decay"])  # weight decay découplé
         p.add_(O.to(p.dtype), alpha=-lr)
