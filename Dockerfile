@@ -23,6 +23,9 @@ RUN uv venv /app/.venv && uv pip install torch==2.14.1 --index-url https://downl
 COPY deploy/requirements.txt deploy/requirements.txt
 RUN uv pip install -r deploy/requirements.txt
 
+# Dagster retire le répertoire de travail de sys.path après avoir chargé le code : sans
+# PYTHONPATH, les imports faits pendant un run (trainer.study) échouent.
+ENV PYTHONPATH=/app
 COPY model model
 COPY dataset/__init__.py dataset/lm_dataset.py dataset/
 COPY trainer trainer
