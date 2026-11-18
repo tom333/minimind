@@ -6,13 +6,11 @@ supérieure à celle de LocalAI : le pod LocalAI est évincé le temps du run, p
 automatiquement par Kubernetes quand le GPU se libère (rien à remettre en route à la main).
 """
 import os
-import sys
 
 import dagster as dg
 import yaml
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(REPO, "trainer"))
 HOST_DIR = "/data/projets/perso/minimind"  # données et sorties restent sur le disque du nœud pc
 
 # Configuration Kubernetes du pod de run : GPU exclusif, nœud pc, volumes de données et de sorties
@@ -50,7 +48,7 @@ class EtudeConfig(dg.Config):
 
 @dg.op
 def etude_optuna(context: dg.OpExecutionContext, config: EtudeConfig) -> None:
-    from study import run_study, summary
+    from trainer.study import run_study, summary
 
     with open(os.path.join(REPO, "trainer", "etudes", config.fichier)) as f:
         cfg = yaml.safe_load(f)
