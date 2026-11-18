@@ -1,0 +1,24 @@
+# FFN à matrices structurées (BTT) : mêmes paramètres et même calcul théorique que le FFN plein,
+# largeur interne x2 ou x3,4. Batch 32 x 2 (les activations BTT sont ~5x plus grosses : 64 x 1 déborde
+# des 12 Go). Repères FFN plein, même batch effectif : val_loss 2.347 (seed 42) / 2.340 (seed 2).
+name: btt
+sampler: grid
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 32
+  accumulation_steps: 2
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 500
+  log_interval: 100
+space:
+  variante:
+    btt2x: {ffn_btt_rank: 9, ffn_btt_mid: "76,64"}
+    btt4x: {ffn_btt_rank: 6, ffn_btt_mid: "128,64"}
