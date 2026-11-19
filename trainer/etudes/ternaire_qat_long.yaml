@@ -1,0 +1,24 @@
+# Test A prolongé : même QAT ternaire, 150M tokens au lieu de 50M, échelle par ligne (la meilleure : 2.231 contre 2.237).
+# en calculant avec les poids arrondis (QAT). Repères, val_loss sur le même jeu :
+#   modèle d'origine 16 bits : 2.006 ; arrondi ternaire brut sans réentraînement : 5.65 (matrix) / 5.54 (row).
+name: ternaire-qat-long
+sampler: grid
+from_subdir: full
+base:
+  from_weight: pretrain
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 150000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 1000
+  log_interval: 100
+space:
+  ternary: [row]
