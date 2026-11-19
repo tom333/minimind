@@ -8,6 +8,7 @@ from .attention import Attention, repeat_kv  # noqa: F401  (ré-exportés)
 from .config import MiniMindConfig
 from .feedforward import FeedForward, MOEFeedForward
 from .memory import MemoryLayer
+from .ternary import convert_to_ternary
 from .norm import RMSNorm
 from .rope import apply_rotary_pos_emb, precompute_freqs_cis  # noqa: F401
 
@@ -105,6 +106,8 @@ class MiniMindModel(nn.Module):
             [MiniMindBlock(l, config) for l in range(self.num_hidden_layers)]
         )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        if getattr(config, "ternary", ""):  # matrices des blocs en −1/0/+1 (embedding et sortie restent précis)
+            convert_to_ternary(self.layers, scale_per_row=config.ternary == "row")
         # cos/sin RoPE précalculés : buffers (déplacés sur GPU avec le modèle) mais pas des poids
         # appris, et non sauvegardés (persistent=False)
         freqs_cos, freqs_sin = precompute_freqs_cis(

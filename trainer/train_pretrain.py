@@ -180,6 +180,7 @@ if __name__ == "__main__":
     parser.add_argument("--zero_init", default=0, type=int, choices=[0, 1], help="Initialise o_proj et down_proj à 0 (chaque bloc démarre comme l'identité)")
     parser.add_argument("--ffn_btt_rank", default=0, type=int, help="FFN à matrices structurées BTT de ce rang (0 = matrices pleines)")
     parser.add_argument("--ffn_btt_mid", default="128,64", type=str, help="Factorisation m1,m2 de la largeur interne du FFN structuré (m1*m2)")
+    parser.add_argument("--ternary", default="", choices=["", "matrix", "row"], help="Poids ternaires −1/0/+1 dans les blocs (échelle par matrice ou par ligne)")
     parser.add_argument("--task", default="pretrain", choices=["pretrain", "sft"], help="pretrain = texte brut ; sft = conversations (loss sur les réponses de l'assistant)")
     parser.add_argument("--from_dir", default="../out", type=str, help="Dossier des poids de départ (--from_weight)")
     parser.add_argument("--max_steps", default=0, type=int, help="Budget en steps (0 = epochs complètes)")
@@ -209,6 +210,7 @@ if __name__ == "__main__":
     os.makedirs(args.save_dir, exist_ok=True)
     arch_overrides = {k: getattr(args, k) for k in ('num_attention_heads', 'num_key_value_heads', 'intermediate_size') if getattr(args, k) is not None}
     if args.logit_softcap: arch_overrides['logit_softcap'] = args.logit_softcap
+    if args.ternary: arch_overrides['ternary'] = args.ternary
     if args.memory_layers: arch_overrides.update(memory_layers=tuple(int(v) for v in args.memory_layers.split(',')), memory_keys=args.memory_keys)
     if args.ffn_btt_rank: arch_overrides.update(ffn_btt_rank=args.ffn_btt_rank, ffn_btt_mid=tuple(int(v) for v in args.ffn_btt_mid.split(',')))
     lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=bool(args.use_moe), **arch_overrides)

@@ -1,0 +1,28 @@
+# SFT complet (1 epoch, ~440M tokens, ~5h30) avec le meilleur réglage de l'étude sft-lr (muon-bas :
+# val_loss 1.513 à 3000 steps, encore en nette baisse). Le meilleur modèle en validation est gardé
+# à part (*_best.pth).
+name: sft-full
+sampler: grid
+data_file: sft_t2t_mini.jsonl
+from_subdir: full
+base:
+  task: sft
+  from_weight: pretrain
+  optimizer: muon
+  learning_rate: 1e-4
+  muon_lr: 0.002
+  epochs: 1
+  max_seq_len: 768
+  batch_size: 16
+  accumulation_steps: 2
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  packing: 0
+  use_compile: 1
+  save_resume: 0
+  save_best: 1
+  save_interval: 5000
+  eval_interval: 2000
+  log_interval: 200
+space:
+  seed: [42]

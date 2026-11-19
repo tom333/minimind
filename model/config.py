@@ -80,3 +80,6 @@ class MiniMindConfig(PretrainedConfig):
         self.memory_k = kwargs.get("memory_k", 8)
         self.memory_heads = kwargs.get("memory_heads", 2)
         self.memory_query_dim = kwargs.get("memory_query_dim", 256)
+        # Poids ternaires (cf. ternary.TernaryLinear) pour les matrices des blocs :
+        # "" = désactivé (origine), "matrix" = une échelle par matrice, "row" = une échelle par neurone.
+        self.ternary = kwargs.get("ternary", "")
