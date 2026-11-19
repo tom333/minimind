@@ -11,6 +11,8 @@ Fichier d'étude (cf. trainer/etudes/*.yaml) :
   n_trials: 12                  # ignoré pour grid
   pruner: none                  # none | median (arrête un trial sous la médiane des autres)
   base: {max_tokens: 50000000}  # arguments communs passés à train_pretrain.py
+  data_file: sft_t2t_mini.jsonl # fichier du dossier de données (défaut : pretrain_t2t_mini.jsonl)
+  from_subdir: full             # sous-dossier des sorties contenant les poids de départ (--from_weight)
   space:                        # un axe par clé
     muon_lr: [0.005, 0.01]              # liste        → valeurs discrètes
     warmup_ratio: {low: 0, high: 0.1}   # {low, high}  → intervalle (log: true pour une échelle log)
@@ -79,8 +81,11 @@ def run_trial(trial, study_cfg, base):
     ]
     cmd += [x for k, v in args.items() for x in (f"--{k}", str(v))]
     cmd += ["--mlflow_uri", os.environ.get("MINIMIND_MLFLOW_URI", "https://mlflow.tgu.ovh")]
-    if "MINIMIND_DATA_DIR" in os.environ and "data_path" not in args:  # dans le cluster : corpus monté
-        cmd += ["--data_path", os.path.join(os.environ["MINIMIND_DATA_DIR"], "pretrain_t2t_mini.jsonl")]
+    # chemins des données et des poids de départ : relatifs aux dossiers montés (cluster) ou locaux
+    data_dir = os.environ.get("MINIMIND_DATA_DIR", os.path.join(HERE, "..", "dataset"))
+    cmd += ["--data_path", os.path.join(data_dir, study_cfg.get("data_file", "pretrain_t2t_mini.jsonl"))]
+    if "from_subdir" in study_cfg:
+        cmd += ["--from_dir", os.path.join(OUT_DIR, study_cfg["from_subdir"])]
     trial.set_user_attr("args", args)
 
     start, value = time.time(), None

@@ -6,7 +6,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import datasets  # noqa: F401  # Windows pyarrow/torch DLL conflict workaround (issue #771)
 import argparse
+import copy
 import random
+import numpy as np
 import time
 import warnings
 import torch
@@ -17,14 +19,49 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, DistributedSampler
 from model.model_minimind import MiniMindConfig
 from datasets import load_dataset
-from dataset.lm_dataset import PretrainDataset, PackedPretrainDataset
+from dataset.lm_dataset import PretrainDataset, PackedPretrainDataset, SFTDataset
 from trainer.trainer_utils import get_lr, Logger, is_main_process, lm_checkpoint, init_distributed_mode, setup_seed, init_model, SkipBatchSampler
 
 warnings.filterwarnings('ignore')
 
 
+def sft_char_lengths(samples, cache_path):
+    """Longueur en caractères de chaque conversation (approximation bon marché de sa longueur en tokens)."""
+    if os.path.exists(cache_path): return torch.from_numpy(np.load(cache_path))
+    lengths = [sum(len(m.get('content') or '') + len(m.get('reasoning_content') or '') for m in conv)
+               for batch in samples.iter(batch_size=10000) for conv in batch['conversations']]
+    np.save(cache_path, np.array(lengths, dtype=np.int32))
+    return torch.tensor(lengths)
+
+
+def bucketed_batches(lengths, batch_size, seed):
+    """Batches de conversations de longueurs voisines (tri par paquets de 100 batches) : peu de padding,
+    tout en gardant un ordre aléatoire des batches."""
+    g = torch.Generator().manual_seed(seed)
+    batches = []
+    for chunk in torch.randperm(len(lengths), generator=g).split(batch_size * 100):
+        batches += list(chunk[torch.argsort(lengths[chunk])].split(batch_size))
+    return [batches[i].tolist() for i in torch.randperm(len(batches), generator=g)]
+
+
+def collate_sft(batch):
+    """Coupe le batch à la longueur de sa plus longue conversation (arrondie à 64 : limite le nombre
+    de formes différentes vues par torch.compile)."""
+    input_ids, labels = torch.stack([b[0] for b in batch]), torch.stack([b[1] for b in batch])
+    longest = int((input_ids != pad_id).sum(1).max())
+    keep = min(input_ids.size(1), -(-longest // 64) * 64)
+    return input_ids[:, :keep], labels[:, :keep]
+
+
+def save_weights(path):
+    raw_model = model.module if isinstance(model, DistributedDataParallel) else model
+    raw_model = getattr(raw_model, '_orig_mod', raw_model)
+    torch.save({k: v.half().cpu() for k, v in raw_model.state_dict().items()}, path)
+
+
 @torch.no_grad()
 def evaluate(val_loader):
+    random.seed(0)  # SFT : prompt système et balises tirés au hasard par le dataset → validation reproductible
     model.eval()
     losses = []
     for input_ids, labels in val_loader:
@@ -84,6 +121,10 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             val_loss = evaluate(val_loader)
             Logger(f'step {global_step}: val_loss {val_loss:.4f}')
             if mlflow: mlflow.log_metric("val_loss", val_loss, step=global_step)
+            if args.save_best and val_loss < best['val_loss'] and is_main_process():
+                # garde le meilleur modèle vu en validation (protège du surapprentissage en fin de run)
+                best.update(val_loss=val_loss, step=global_step)
+                save_weights(f"{args.save_dir}/{args.save_weight}_{lm_config.hidden_size}_best.pth")
 
         if (step % args.save_interval == 0 or last_step) and is_main_process():
             model.eval()
@@ -139,6 +180,10 @@ if __name__ == "__main__":
     parser.add_argument("--zero_init", default=0, type=int, choices=[0, 1], help="Initialise o_proj et down_proj à 0 (chaque bloc démarre comme l'identité)")
     parser.add_argument("--ffn_btt_rank", default=0, type=int, help="FFN à matrices structurées BTT de ce rang (0 = matrices pleines)")
     parser.add_argument("--ffn_btt_mid", default="128,64", type=str, help="Factorisation m1,m2 de la largeur interne du FFN structuré (m1*m2)")
+    parser.add_argument("--task", default="pretrain", choices=["pretrain", "sft"], help="pretrain = texte brut ; sft = conversations (loss sur les réponses de l'assistant)")
+    parser.add_argument("--from_dir", default="../out", type=str, help="Dossier des poids de départ (--from_weight)")
+    parser.add_argument("--max_steps", default=0, type=int, help="Budget en steps (0 = epochs complètes)")
+    parser.add_argument("--save_best", default=0, type=int, choices=[0, 1], help="Sauver aussi le meilleur modèle en validation (*_best.pth)")
     parser.add_argument("--memory_layers", default="", type=str, help="Blocs recevant une couche mémoire, ex. '4' ou '2,5' (vide = aucune)")
     parser.add_argument("--memory_keys", default=256, type=int, help="Nb de sous-clés par moitié (table de memory_keys² lignes)")
     parser.add_argument("--memory_lr_ratio", default=1.0, type=float, help="Multiplicateur du LR AdamW pour la table et les clés de la mémoire")
@@ -184,24 +229,36 @@ if __name__ == "__main__":
         wandb.init(project=args.wandb_project, name=wandb_run_name, id=wandb_id, resume=resume)
     
     # ========== 5. 定义模型、数据、优化器 ==========
-    model, tokenizer = init_model(lm_config, args.from_weight, device=args.device)
-    raw_ds = load_dataset('json', data_files=args.data_path, split='train')
+    model, tokenizer = init_model(lm_config, args.from_weight, save_dir=args.from_dir, device=args.device)
+    pad_id, best, sft_lengths = tokenizer.pad_token_id, {'val_loss': float('inf'), 'step': 0}, None
+    raw_ds = load_dataset('json', data_files=args.data_path, split='train') if args.task == 'pretrain' else None
+    if args.task == 'sft':
+        train_ds = SFTDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
+        raw_ds = train_ds.samples
     # split train/val ALÉATOIRE (seed fixe) : le fichier est trié par source (ex. QCM anglais à la fin)
     val_idx = set(random.Random(0).sample(range(len(raw_ds)), args.val_docs))
     train_idx = [i for i in range(len(raw_ds)) if i not in val_idx]
-    if args.packing:
+    if args.task == 'sft':
+        sft_lengths = sft_char_lengths(raw_ds, f'{args.data_path}.charlen.npy')[train_idx]
+        val_ds = copy.copy(train_ds)
+        val_ds.samples = raw_ds.select(sorted(val_idx))
+        train_ds.samples = raw_ds.select(train_idx)
+    elif args.packing:
         train_ds = PackedPretrainDataset(raw_ds.select(train_idx), tokenizer, args.max_seq_len, cache_path=f'{args.data_path}.train_rand{args.val_docs}.npy')
     else:
         train_ds = PretrainDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
         train_ds.samples = train_ds.samples.select(train_idx)
     val_loader = None
-    if args.val_docs > 0:
+    if args.task == 'sft':
+        val_loader = DataLoader(val_ds, batch_size=args.batch_size, collate_fn=collate_sft)
+    elif args.val_docs > 0:
         val_ds = PackedPretrainDataset(raw_ds.select(sorted(val_idx)), tokenizer, args.max_seq_len, cache_path=f'{args.data_path}.val_rand{args.val_docs}.npy')
         val_loader = DataLoader(val_ds, batch_size=args.batch_size)
     tokens_per_step = args.batch_size * args.max_seq_len
     steps_per_epoch = (len(train_ds) + args.batch_size - 1) // args.batch_size
     total_steps = args.epochs * steps_per_epoch
     if args.max_tokens > 0: total_steps = min(total_steps, args.max_tokens // tokens_per_step)
+    if args.max_steps > 0: total_steps = min(total_steps, args.max_steps)
     Logger(f'train: {len(train_ds)} séquences, total_steps: {total_steps} (~{total_steps * tokens_per_step / 1e6:.0f}M tokens)')
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
     scaler = torch.amp.GradScaler('cuda', enabled=(args.dtype == 'float16'))
@@ -256,7 +313,10 @@ if __name__ == "__main__":
         setup_seed(args.seed + epoch); indices = torch.randperm(len(train_ds)).tolist()
         skip = start_step if (epoch == start_epoch and start_step > 0) else 0
         batch_sampler = SkipBatchSampler(train_sampler or indices, args.batch_size, skip)
-        loader = DataLoader(train_ds, batch_sampler=batch_sampler, num_workers=args.num_workers, pin_memory=True)
+        if args.task == 'sft':  # batches triés par longueur + padding dynamique (pas de reprise au milieu d'une epoch)
+            loader = DataLoader(train_ds, batch_sampler=bucketed_batches(sft_lengths, args.batch_size, args.seed + epoch), collate_fn=collate_sft, num_workers=args.num_workers, pin_memory=True)
+        else:
+            loader = DataLoader(train_ds, batch_sampler=batch_sampler, num_workers=args.num_workers, pin_memory=True)
         if skip > 0: 
             Logger(f'Epoch [{epoch + 1}/{args.epochs}]: 跳过前{start_step}个step，从step {start_step + 1}开始')
             done = train_epoch(epoch, loader, len(loader) + skip, start_step, wandb)

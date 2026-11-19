@@ -1,0 +1,29 @@
+# SFT (conversations) à partir du modèle pré-entraîné du full run : choix de l'optimiseur et du LR
+# sur un budget court (3000 steps de 16 conversations, ~23M tokens). La val_loss est calculée sur les
+# réponses de l'assistant de 2000 conversations mises de côté.
+# Repère : aucun pour l'instant ; au départ (modèle pré-entraîné, avant SFT) la val_loss vaut ~2.0.
+name: sft-lr
+sampler: grid
+data_file: sft_t2t_mini.jsonl
+from_subdir: full
+base:
+  task: sft
+  from_weight: pretrain
+  max_seq_len: 768
+  batch_size: 16
+  accumulation_steps: 2
+  max_steps: 3000
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  packing: 0
+  use_compile: 1
+  save_resume: 0
+  save_interval: 100000
+  eval_interval: 500
+  log_interval: 100
+space:
+  variante:
+    adamw-1e-5: {optimizer: adamw, learning_rate: 1e-5}     # réglage d'origine du projet
+    adamw-1e-4: {optimizer: adamw, learning_rate: 1e-4}
+    muon-bas: {optimizer: muon, learning_rate: 1e-4, muon_lr: 0.002}
+    muon-haut: {optimizer: muon, learning_rate: 3e-4, muon_lr: 0.005}
