@@ -34,6 +34,7 @@ ENV PYTHONPATH=/app \
 COPY model model
 COPY dataset/__init__.py dataset/lm_dataset.py dataset/
 COPY trainer trainer
+COPY corpus corpus
 COPY orchestration orchestration
 RUN useradd --uid 1000 --home-dir /app dagster && chown dagster /app \
     # Le K8sRunLauncher monte dagster.yaml dans /opt/dagster/dagster_home et y écrit

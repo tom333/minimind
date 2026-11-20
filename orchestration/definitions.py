@@ -72,4 +72,49 @@ def etude():
     etude_optuna()
 
 
-defs = dg.Definitions(jobs=[etude])
+# -------------------------------------------------------------------------------------
+# Chaîne de données du modèle bilingue français / anglais (assets, sur processeur)
+# -------------------------------------------------------------------------------------
+# Pod sans GPU : seul le volume du corpus est monté. Les assets écrivent dans <corpus>/fr_en/.
+CPU_RUN = {
+    "dagster-k8s/config": {
+        "container_config": {
+            "resources": {"requests": {"cpu": "1", "memory": "2Gi"}, "limits": {"memory": "8Gi"}},
+            "volume_mounts": [{"name": "corpus", "mount_path": "/data/corpus"}],
+        },
+        "pod_spec_config": {
+            "node_selector": {"kubernetes.io/hostname": "pc"},
+            "volumes": [{"name": "corpus", "host_path": {"path": f"{HOST_DIR}/dataset"}}],
+        },
+        "job_spec_config": {"ttl_seconds_after_finished": 86400},
+    }
+}
+
+
+def _source_asset(name: str, spec: dict):
+    @dg.asset(
+        name=f"brut_{name}", group_name="corpus_fr_en", kinds={"huggingface"},
+        description=f"{spec['role']} ({spec['lang']}, {spec['go']} Go de texte visés, licence {spec['licence']})",
+    )
+    def _asset() -> dg.MaterializeResult:
+        from corpus.pretrain_sources import build
+
+        stats = build(name)
+        return dg.MaterializeResult(metadata={k: v for k, v in stats.items()})
+
+    return _asset
+
+
+def _source_assets():
+    from corpus.pretrain_sources import SOURCES
+
+    return [_source_asset(name, spec) for name, spec in SOURCES.items()]
+
+
+sources_brutes = _source_assets()
+corpus_brut = dg.define_asset_job(
+    "corpus_brut", selection=dg.AssetSelection.groups("corpus_fr_en"), tags=CPU_RUN,
+    description="Télécharge, nettoie et déduplique les sources de texte du modèle français / anglais.",
+)
+
+defs = dg.Definitions(assets=sources_brutes, jobs=[etude, corpus_brut])

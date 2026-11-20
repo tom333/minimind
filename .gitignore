@@ -12,3 +12,5 @@ dataset/.msc
 dataset/.mv
 dataset/*.npy
 checkpoints/
+dataset/fr_en/
+dataset/**/*.parquet
