@@ -5,5 +5,6 @@
 !trainer/
 !corpus/
 !orchestration/
-!deploy/requirements.txt
+!pyproject.toml
+!uv.lock
 **/__pycache__

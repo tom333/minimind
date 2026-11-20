@@ -12,24 +12,34 @@ import json
 import os
 import sys
 
-from .pretrain_sources import DATA_DIR, RAW_DIR, SOURCES
+from .pretrain_sources import DATA_DIR, RAW_DIR
+from .pretrain_sources import SOURCES as ALL_SOURCES
 
 OUT_DIR = os.path.join(DATA_DIR, "fr_en")
 
 
-def corpus_path(fr_share):
-    return os.path.join(OUT_DIR, f"pretrain_fr{round(fr_share * 100)}.jsonl")
+# Variantes de corpus : quelles sources entrent dans le mélange. "" = web français courant (FineWeb-2),
+# "hq" = web français sélectionné sur sa qualité (FineWeb2-HQ) à la place.
+VARIANTS = {
+    "": ["wikipedia_fr", "fineweb2_fr", "fineweb_edu_en"],
+    "hq": ["wikipedia_fr", "fineweb2_hq_fr", "fineweb_edu_en"],
+}
 
 
-def mix(fr_share=0.65):
+def corpus_path(fr_share, variant=""):
+    return os.path.join(OUT_DIR, f"pretrain_fr{round(fr_share * 100)}{variant}.jsonl")
+
+
+def mix(fr_share=0.65, variant=""):
     """Garde le plus de texte possible en respectant fr_share (part du français, en caractères)."""
+    SOURCES = {name: ALL_SOURCES[name] for name in VARIANTS[variant]}
     size = {"fr": 0, "en": 0}
     for name, src in SOURCES.items():
         size[src["lang"]] += os.path.getsize(os.path.join(RAW_DIR, f"{name}.jsonl"))
     total = min(size["fr"] / fr_share, size["en"] / (1 - fr_share))
     keep = {"fr": fr_share * total / size["fr"], "en": (1 - fr_share) * total / size["en"]}  # part gardée par langue
     stats = {name: dict(documents=0, caracteres=0) for name in SOURCES}
-    with open(corpus_path(fr_share) + ".tmp", "w", encoding="utf-8") as out:
+    with open(corpus_path(fr_share, variant) + ".tmp", "w", encoding="utf-8") as out:
         for name, src in SOURCES.items():
             threshold = int(keep[src["lang"]] * 2**32)
             with open(os.path.join(RAW_DIR, f"{name}.jsonl"), encoding="utf-8") as f:
@@ -40,10 +50,10 @@ def mix(fr_share=0.65):
                     out.write(line)
                     stats[name]["documents"] += 1
                     stats[name]["caracteres"] += len(line)
-    os.replace(corpus_path(fr_share) + ".tmp", corpus_path(fr_share))
+    os.replace(corpus_path(fr_share, variant) + ".tmp", corpus_path(fr_share, variant))
     chars = {lang: sum(s["caracteres"] for n, s in stats.items() if SOURCES[n]["lang"] == lang) for lang in size}
     return {
-        "chemin": corpus_path(fr_share),
+        "chemin": corpus_path(fr_share, variant),
         "documents": sum(s["documents"] for s in stats.values()),
         "go": round(sum(chars.values()) / 1e9, 2),
         "part_francais": round(chars["fr"] / sum(chars.values()), 3),

@@ -26,6 +26,13 @@ SOURCES = {
         lang="fr", go=1.5, files=HF + "HuggingFaceFW/fineweb-2/data/fra_Latn/train/*.parquet", licence="ODC-By",
         role="web varié, déjà filtré et dédupliqué", keep=lambda r: r.get("language_score", 1.0) >= 0.9,
     ),
+    # Sélection par modèle des meilleures pages de FineWeb-2 (10 % retenus par les auteurs), dont on ne
+    # garde que le tiers le mieux noté : l'équivalent français du filtre « éducatif » anglais.
+    "fineweb2_hq_fr": dict(
+        lang="fr", go=1.5, files=HF + "epfml/FineWeb2-HQ/fra_Latn/*.parquet", licence="ODC-By",
+        role="web français sélectionné sur sa qualité (score ≥ 0,5)", columns=["text", "quality_score"],
+        keep=lambda r: r.get("quality_score", 0.0) >= 0.5,
+    ),
     "fineweb_edu_en": dict(
         lang="en", go=1.4, files=HF + "HuggingFaceFW/fineweb-edu/sample/10BT/*.parquet", licence="ODC-By",
         role="web filtré sur sa valeur éducative", keep=lambda r: r.get("score", 5.0) >= 3.0,
@@ -58,7 +65,9 @@ def build(name, go=None):
     os.makedirs(RAW_DIR, exist_ok=True)
     path = os.path.join(RAW_DIR, f"{name}.jsonl")
     seen, stats = set(), dict(lus=0, gardes=0, filtres=0, courts=0, doublons=0, caracteres=0)
-    stream = load_dataset("parquet", data_files=src["files"], split="train", streaming=True)
+    # `columns` : ne lire que les colonnes utiles (certaines sources portent de gros vecteurs par ligne)
+    extra = {"columns": src["columns"]} if "columns" in src else {}
+    stream = load_dataset("parquet", data_files=src["files"], split="train", streaming=True, **extra)
     with open(path + ".tmp", "w", encoding="utf-8") as f:
         for row in stream:
             stats["lus"] += 1

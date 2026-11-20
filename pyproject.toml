@@ -1,0 +1,37 @@
+[project]
+name = "minimind-experiences"
+version = "0.1.0"
+description = "Études d'entraînement, d'architecture et de compression sur un petit modèle de langue (base : MiniMind)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # socle : entraînement et données
+    "torch==2.14.1",
+    "transformers>=5",
+    "tokenizers",
+    "datasets>=5",
+    "numpy>=2",
+    "safetensors",
+    "huggingface-hub>=2",
+    # suivi et campagnes d'essais
+    "mlflow-skinny==3.12.*",  # aligné sur la version du serveur MLflow du cluster
+    "optuna>=5",
+    "pyyaml",
+    # orchestration : versions liées au déploiement Dagster du cluster (chart 1.13.30)
+    "dagster==1.13.30",
+    "dagster-k8s==0.29.30",
+    "dagster-postgres==0.29.30",
+]
+
+[dependency-groups]
+dev = ["ruff", "scipy", "datasketch"]  # lint, ajustements de courbes, analyse de doublons
+
+[tool.uv]
+package = false  # dépôt de scripts, pas un paquet installable
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }

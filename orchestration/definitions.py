@@ -15,6 +15,8 @@ HOST_DIR = "/data/projets/perso/minimind"  # données et sorties restent sur le 
 
 # Configuration Kubernetes du pod de run : GPU exclusif, nœud pc, volumes de données et de sorties
 GPU_RUN = {
+    # file d'attente Dagster : un seul run portant ce tag à la fois (limite définie dans le déploiement)
+    "gpu": "pc",
     "dagster-k8s/config": {
         "container_config": {
             "resources": {
