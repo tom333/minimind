@@ -35,33 +35,40 @@ SOURCES = [
 ]
 
 
-def _val_tokens_and_sources():
-    val = np.load(f"{DATA}.val_rand{VAL_DOCS}.npy")
+def _val_tokens_and_sources(data=DATA, doc_groups=None):
+    """Blocs de validation + n° de groupe de chaque token. `doc_groups` : nom du groupe (langue, source…)
+    de chaque document de validation, dans l'ordre du fichier ; None = sources du corpus chinois d'origine."""
+    val = np.load(f"{data}.val_rand{VAL_DOCS}.npy")
     val = torch.from_numpy(val[: len(val) // SEQ * SEQ].astype(np.int64))
-    # même tirage que train_pretrain.py : retrouve l'index d'origine de chaque document de validation
-    doc_idx = sorted(random.Random(0).sample(range(N_DOCS), VAL_DOCS))
-    bounds = torch.tensor([b for b, _ in SOURCES])
-    doc_source = torch.bucketize(torch.tensor(doc_idx), bounds, right=True)
+    if doc_groups is None:
+        # même tirage que train_pretrain.py : retrouve l'index d'origine de chaque document de validation
+        doc_idx = sorted(random.Random(0).sample(range(N_DOCS), VAL_DOCS))
+        names = [name for _, name in SOURCES]
+        doc_source = torch.bucketize(torch.tensor(doc_idx), torch.tensor([b for b, _ in SOURCES]), right=True)
+    else:
+        names = sorted(set(doc_groups))
+        doc_source = torch.tensor([names.index(g) for g in doc_groups])
     token_doc = torch.cumsum(val == BOS, 0) - 1  # n° du document de chaque token
-    return val.view(-1, SEQ), doc_source[token_doc].view(-1, SEQ)
+    return val.view(-1, SEQ), doc_source[token_doc].view(-1, SEQ), names
 
 
-def _freq_buckets():
+def _freq_buckets(data=DATA, vocab_size=6400):
     """Classe chaque token du vocabulaire : 0 = fréquent (50 % des occurrences), 1 = moyen (40 %), 2 = rare (10 %)."""
-    train = np.load(f"{DATA}.train_rand{VAL_DOCS}.npy", mmap_mode="r")
-    counts = torch.from_numpy(np.bincount(train[:50_000_000], minlength=6400)).float()
+    train = np.load(f"{data}.train_rand{VAL_DOCS}.npy", mmap_mode="r")
+    step = max(1, len(train) // 50_000_000)  # échantillon régulier : le corpus peut être rangé par source
+    counts = torch.from_numpy(np.bincount(train[::step], minlength=vocab_size)).float()
     order = counts.argsort(descending=True)
     mass = counts[order].cumsum(0) / counts.sum()
-    bucket = torch.empty(6400, dtype=torch.long)
+    bucket = torch.empty(vocab_size, dtype=torch.long)
     bucket[order] = (mass > 0.5).long() + (mass > 0.9).long()
     return bucket
 
 
 @torch.no_grad()
-def detailed_eval(model, device="cuda", ref_model=None, batch_size=32):
+def detailed_eval(model, device="cuda", ref_model=None, batch_size=32, data=DATA, doc_groups=None):
     """Retourne un dict de métriques {nom: valeur}. `model(x).logits` doit prédire le token suivant."""
-    blocks, sources = _val_tokens_and_sources()
-    bucket = _freq_buckets()
+    blocks, sources, names = _val_tokens_and_sources(data, doc_groups)
+    bucket = _freq_buckets(data, model.config.vocab_size)
     was_training = model.training
     model.eval()
     losses, correct, kls, flips = [], [], [], []
@@ -91,7 +98,7 @@ def detailed_eval(model, device="cuda", ref_model=None, batch_size=32):
     loss, correct = torch.cat(losses), torch.cat(correct).float()
     target, src = blocks[:, 1:], sources[:, 1:]
     out = {"val_loss": loss.mean().item(), "top1": correct.mean().item()}
-    for i, (_, name) in enumerate(SOURCES):
+    for i, name in enumerate(names):
         out[f"loss_src_{name}"] = loss[src == i].mean().item()
     for i, name in enumerate(["frequents", "moyens", "rares"]):
         out[f"loss_tok_{name}"] = loss[bucket[target] == i].mean().item()

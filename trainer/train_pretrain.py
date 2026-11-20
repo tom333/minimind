@@ -19,6 +19,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, DistributedSampler
 from model.model_minimind import MiniMindConfig
 from datasets import load_dataset
+from transformers import AutoTokenizer
 from dataset.lm_dataset import PretrainDataset, PackedPretrainDataset, SFTDataset
 from trainer.trainer_utils import get_lr, Logger, is_main_process, lm_checkpoint, init_distributed_mode, setup_seed, init_model, SkipBatchSampler
 
@@ -181,6 +182,7 @@ if __name__ == "__main__":
     parser.add_argument("--ffn_btt_rank", default=0, type=int, help="FFN à matrices structurées BTT de ce rang (0 = matrices pleines)")
     parser.add_argument("--ffn_btt_mid", default="128,64", type=str, help="Factorisation m1,m2 de la largeur interne du FFN structuré (m1*m2)")
     parser.add_argument("--ternary", default="", choices=["", "matrix", "row"], help="Poids ternaires −1/0/+1 dans les blocs (échelle par matrice ou par ligne)")
+    parser.add_argument("--tokenizer_path", default="../model", type=str, help="Dossier du tokenizer (le vocabulaire du modèle en découle)")
     parser.add_argument("--task", default="pretrain", choices=["pretrain", "sft"], help="pretrain = texte brut ; sft = conversations (loss sur les réponses de l'assistant)")
     parser.add_argument("--from_dir", default="../out", type=str, help="Dossier des poids de départ (--from_weight)")
     parser.add_argument("--max_steps", default=0, type=int, help="Budget en steps (0 = epochs complètes)")
@@ -213,6 +215,7 @@ if __name__ == "__main__":
     if args.ternary: arch_overrides['ternary'] = args.ternary
     if args.memory_layers: arch_overrides.update(memory_layers=tuple(int(v) for v in args.memory_layers.split(',')), memory_keys=args.memory_keys)
     if args.ffn_btt_rank: arch_overrides.update(ffn_btt_rank=args.ffn_btt_rank, ffn_btt_mid=tuple(int(v) for v in args.ffn_btt_mid.split(',')))
+    arch_overrides['vocab_size'] = len(AutoTokenizer.from_pretrained(args.tokenizer_path))
     lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=bool(args.use_moe), **arch_overrides)
     ckp_data = lm_checkpoint(lm_config, weight=args.save_weight, save_dir='../checkpoints') if args.from_resume==1 else None
     
@@ -231,7 +234,7 @@ if __name__ == "__main__":
         wandb.init(project=args.wandb_project, name=wandb_run_name, id=wandb_id, resume=resume)
     
     # ========== 5. 定义模型、数据、优化器 ==========
-    model, tokenizer = init_model(lm_config, args.from_weight, save_dir=args.from_dir, device=args.device)
+    model, tokenizer = init_model(lm_config, args.from_weight, tokenizer_path=args.tokenizer_path, save_dir=args.from_dir, device=args.device)
     pad_id, best, sft_lengths = tokenizer.pad_token_id, {'val_loss': float('inf'), 'step': 0}, None
     raw_ds = load_dataset('json', data_files=args.data_path, split='train') if args.task == 'pretrain' else None
     if args.task == 'sft':
@@ -327,7 +330,9 @@ if __name__ == "__main__":
         if done: break
     if args.detailed_eval and is_main_process():
         from trainer.eval_detail import detailed_eval, format_metrics
-        metrics = detailed_eval(getattr(model, '_orig_mod', model), args.device)
+        # corpus avec un champ `lang` (français / anglais) : loss par langue ; sinon sources du corpus d'origine
+        groups = raw_ds.select(sorted(val_idx))['lang'] if 'lang' in raw_ds.column_names else None
+        metrics = detailed_eval(getattr(model, '_orig_mod', model), args.device, data=args.data_path, doc_groups=groups)
         Logger(format_metrics(metrics))
         if mlflow: mlflow.log_metrics({f'final_{k}': v for k, v in metrics.items()})
     if mlflow: mlflow.end_run()

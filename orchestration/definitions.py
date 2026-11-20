@@ -79,7 +79,7 @@ def etude():
 CPU_RUN = {
     "dagster-k8s/config": {
         "container_config": {
-            "resources": {"requests": {"cpu": "1", "memory": "2Gi"}, "limits": {"memory": "8Gi"}},
+            "resources": {"requests": {"cpu": "1", "memory": "2Gi"}, "limits": {"memory": "16Gi"}},
             "volume_mounts": [{"name": "corpus", "mount_path": "/data/corpus"}],
         },
         "pod_spec_config": {
@@ -112,9 +112,29 @@ def _source_assets():
 
 
 sources_brutes = _source_assets()
+
+
+class MelangeConfig(dg.Config):
+    part_francais: float = 0.65  # part du français dans le corpus, en volume de texte
+
+
+@dg.asset(group_name="corpus_fr_en", deps=[a.key for a in sources_brutes],
+          description="Corpus de pretrain bilingue au ratio demandé (fr_en/pretrain_frNN.jsonl).")
+def corpus_melange(config: MelangeConfig) -> dg.MaterializeResult:
+    from corpus.mix import mix
+
+    return dg.MaterializeResult(metadata=mix(config.part_francais))
+
+
+@dg.asset(group_name="corpus_fr_en", deps=[corpus_melange],
+          description="Tokenizer BPE commun aux deux langues, appris sur un échantillon du corpus mélangé.")
+def tokenizer_fr_en(config: MelangeConfig) -> dg.MaterializeResult:
+    from corpus.mix import train_tokenizer
+
+    return dg.MaterializeResult(metadata=train_tokenizer(config.part_francais))
 corpus_brut = dg.define_asset_job(
     "corpus_brut", selection=dg.AssetSelection.groups("corpus_fr_en"), tags=CPU_RUN,
     description="Télécharge, nettoie et déduplique les sources de texte du modèle français / anglais.",
 )
 
-defs = dg.Definitions(assets=sources_brutes, jobs=[etude, corpus_brut])
+defs = dg.Definitions(assets=[*sources_brutes, corpus_melange, tokenizer_fr_en], jobs=[etude, corpus_brut])

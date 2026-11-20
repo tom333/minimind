@@ -84,6 +84,8 @@ def run_trial(trial, study_cfg, base):
     # chemins des données et des poids de départ : relatifs aux dossiers montés (cluster) ou locaux
     data_dir = os.environ.get("MINIMIND_DATA_DIR", os.path.join(HERE, "..", "dataset"))
     cmd += ["--data_path", os.path.join(data_dir, study_cfg.get("data_file", "pretrain_t2t_mini.jsonl"))]
+    if "tokenizer_subdir" in study_cfg:  # tokenizer rangé avec les données (ex. fr_en/tokenizer_fr65_16k)
+        cmd += ["--tokenizer_path", os.path.join(data_dir, study_cfg["tokenizer_subdir"])]
     if "from_subdir" in study_cfg:
         cmd += ["--from_dir", os.path.join(OUT_DIR, study_cfg["from_subdir"])]
     trial.set_user_attr("args", args)

@@ -1,0 +1,25 @@
+# Premier pretrain bilingue français / anglais, budget court (50M tokens) : valide la chaîne (corpus,
+# tokenizer 16k, évaluation par langue) avant le run long. La val_loss n'est PAS comparable à celle du
+# corpus chinois (autre tokenizer, autres textes) : seuls repères, le hasard = ln(16000) = 9.68 et
+# l'écart entre les deux langues.
+name: fr-en-court
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+space:
+  seed: [42]
