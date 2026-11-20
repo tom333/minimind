@@ -1,0 +1,54 @@
+# Études
+
+Journal des expériences menées sur ce dépôt, du 16 au 20 novembre 2026. Chaque fiche répond à une
+question, avec son protocole, ses mesures, sa conclusion et ses limites. Les résultats négatifs y figurent
+au même titre que les autres.
+
+## Règles communes
+
+- **Matériel** : une RTX 3060 (12 Go). Un essai standard dure 20 minutes (50M tokens).
+- **Mesure** : loss de validation sur 2 000 documents tirés au hasard, jamais vus à l'entraînement. Plus bas = mieux.
+- **Bruit** : 0,012 de val_loss entre deux graines avec la recette finale. Un écart plus petit n'est pas interprété.
+- **Repères** : hasard 8,76 ; fréquences des tokens seules 7,40 ; réglages d'origine à 50M tokens 2,95.
+- **Budget** : 20 minutes suffisent pour juger une optimisation. Un ajout de capacité se juge sur un run long (étude 06).
+- **Suivi** : chaque run est enregistré dans MLflow, chaque campagne dans une étude Optuna.
+
+## Synthèse
+
+| # | Question | Résultat | Verdict |
+|---|---|---|---|
+| [01](01-debit-entrainement.md) | Où part le temps de calcul ? | débit utile ×3 sans toucher au modèle ; 53 % du calcul portait sur du remplissage | gain |
+| [02](02-validation-et-bruit.md) | Peut-on se fier à la mesure ? | la validation initiale ne contenait que de l'anglais ; bruit mesuré à 0,012 | correction |
+| [03](03-learning-rate-et-reglages.md) | Réglages et retouches publiées | learning rate d'origine déjà bon ; WSD, plafonnement des logits et initialisation à zéro n'apportent rien | négatif |
+| [04](04-taille-de-batch.md) | Taille de batch | −0,42 de val_loss en divisant le batch par quatre | gain majeur |
+| [05](05-optimiseur-muon.md) | Muon contre AdamW | −0,14 pour 15 % de temps en plus | gain |
+| [06](06-loi-d-echelle.md) | Que rapporte un token de plus ? | run long à 2,006, dans la plage prédite (1,89 à 2,18) | prédiction vérifiée |
+| [07](07-architecture.md) | Profondeur, largeur, têtes, experts | aucune variante ne bat l'architecture d'origine | négatif |
+| [08](08-matrices-structurees.md) | Matrices structurées dans le FFN | moins bon de 0,058, mémoire ×2,5, temps ×2,4 | négatif |
+| [09](09-couche-memoire.md) | Couche mémoire à clés produit | −0,010 pour +80 % de paramètres | négatif |
+| [10](10-compression-des-poids.md) | Redondance des poids | 2 fois plus petit sans perte mesurable ; ni voisinage, ni neurones morts | constat |
+| [11](11-poids-ternaires.md) | Poids à trois valeurs | voir la fiche | gain sous condition |
+| [12](12-ajustement-conversation.md) | Du modèle de langue à l'assistant | val_loss 2,38 → 1,26 ; réglage d'origine dix fois trop bas | gain |
+| [13](13-evaluation-et-raisonnement.md) | Au-delà de la moyenne | tokens rares deux fois plus durs ; 10 % de réussite sur deux opérations enchaînées | constat |
+| [14](14-corpus.md) | Les données | corpus bilingue de 1,02 milliard de tokens, traçable et diffusable | construction |
+| [15](15-plateforme.md) | La plateforme | Dagster, Optuna et MLflow, avec partage automatique du GPU | construction |
+
+## Le chemin parcouru, à budget égal (50M tokens)
+
+| Étape | val_loss |
+|---|---|
+| Réglages d'origine | 2,95 |
+| + warmup et weight decay | 2,91 |
+| + batch de 64 séquences au lieu de 256 | 2,49 |
+| + optimiseur Muon | 2,35 |
+
+Ce gain de 0,60 dépasse celui d'un doublement des données (0,49 entre 50M et 100M tokens). Dans le même
+temps, sur six techniques tirées de publications récentes, une seule a tenu à cette échelle : Muon. Les cinq
+autres (noyaux Liger, calendrier WSD, plafonnement des logits avec initialisation à zéro, matrices
+structurées, couche mémoire) n'apportent rien de mesurable ou dégradent le modèle.
+
+## Crédit
+
+Le modèle et les scripts de base viennent de [MiniMind](https://github.com/jingyaogong/minimind) (Apache 2.0).
+Les études, l'outillage d'expérimentation, la chaîne de données bilingue et les variantes d'architecture
+testées ici sont propres à ce dépôt.
