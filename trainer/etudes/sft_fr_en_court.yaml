@@ -1,0 +1,29 @@
+# SFT bilingue (conversations françaises et anglaises, corpus/sft_sources.py) à partir du modèle
+# pré-entraîné bilingue complet : vérifie que le réglage retenu sur le corpus chinois (muon-bas) reste
+# le meilleur, sur un budget court (3000 steps de 16 conversations).
+# Repères : au départ (avant SFT) la val_loss vaut ~4.4 (fr 3.8, en 5.3) ; SFT chinois : 1.513 à 3000 steps.
+name: sft-fr-en-court
+sampler: grid
+data_file: fr_en/sft_fr_en.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+from_subdir: etude_fr-en-full
+base:
+  task: sft
+  from_weight: fr-en-full-t0
+  system_prompts: fr_en
+  max_seq_len: 768
+  batch_size: 16
+  accumulation_steps: 2
+  max_steps: 3000
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  packing: 0
+  use_compile: 1
+  save_resume: 0
+  save_interval: 100000
+  eval_interval: 500
+  log_interval: 100
+space:
+  variante:
+    muon-bas: {optimizer: muon, learning_rate: 1e-4, muon_lr: 0.002}
+    muon-haut: {optimizer: muon, learning_rate: 3e-4, muon_lr: 0.005}

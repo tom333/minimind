@@ -7,6 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import datasets  # noqa: F401  # Windows pyarrow/torch DLL conflict workaround (issue #771)
 import argparse
 import copy
+import json
 import random
 import numpy as np
 import time
@@ -183,6 +184,7 @@ if __name__ == "__main__":
     parser.add_argument("--ffn_btt_mid", default="128,64", type=str, help="Factorisation m1,m2 de la largeur interne du FFN structuré (m1*m2)")
     parser.add_argument("--ternary", default="", choices=["", "matrix", "row"], help="Poids ternaires −1/0/+1 dans les blocs (échelle par matrice ou par ligne)")
     parser.add_argument("--tokenizer_path", default="../model", type=str, help="Dossier du tokenizer (le vocabulaire du modèle en découle)")
+    parser.add_argument("--system_prompts", default="zh", choices=["zh", "fr_en"], help="SFT : liste des prompts système ajoutés au hasard (zh = liste d'origine)")
     parser.add_argument("--task", default="pretrain", choices=["pretrain", "sft"], help="pretrain = texte brut ; sft = conversations (loss sur les réponses de l'assistant)")
     parser.add_argument("--from_dir", default="../out", type=str, help="Dossier des poids de départ (--from_weight)")
     parser.add_argument("--max_steps", default=0, type=int, help="Budget en steps (0 = epochs complètes)")
@@ -238,7 +240,8 @@ if __name__ == "__main__":
     pad_id, best, sft_lengths = tokenizer.pad_token_id, {'val_loss': float('inf'), 'step': 0}, None
     raw_ds = load_dataset('json', data_files=args.data_path, split='train') if args.task == 'pretrain' else None
     if args.task == 'sft':
-        train_ds = SFTDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
+        from dataset.lm_dataset import SYSTEM_PROMPTS_FR_EN
+        train_ds = SFTDataset(args.data_path, tokenizer, max_length=args.max_seq_len, system_prompts=SYSTEM_PROMPTS_FR_EN if args.system_prompts == 'fr_en' else None)
         raw_ds = train_ds.samples
     # split train/val ALÉATOIRE (seed fixe) : le fichier est trié par source (ex. QCM anglais à la fin)
     val_idx = set(random.Random(0).sample(range(len(raw_ds)), args.val_docs))
@@ -256,6 +259,15 @@ if __name__ == "__main__":
     val_loader = None
     if args.task == 'sft':
         val_loader = DataLoader(val_ds, batch_size=args.batch_size, collate_fn=collate_sft)
+        # fichier de métadonnées (corpus/sft_sources.py) : langue de chaque conversation → loss par langue en fin de run
+        meta_path = args.data_path[:-len('.jsonl')] + '.meta.jsonl'
+        val_by_lang = {}
+        if os.path.exists(meta_path):
+            with open(meta_path) as f: langs = [json.loads(line)['lang'] for line in f]
+            for lang in sorted(set(langs)):
+                ds = copy.copy(val_ds)
+                ds.samples = raw_ds.select([i for i in sorted(val_idx) if langs[i] == lang])
+                val_by_lang[lang] = DataLoader(ds, batch_size=args.batch_size, collate_fn=collate_sft)
     elif args.val_docs > 0:
         val_ds = PackedPretrainDataset(raw_ds.select(sorted(val_idx)), tokenizer, args.max_seq_len, cache_path=f'{args.data_path}.val_rand{args.val_docs}.npy')
         val_loader = DataLoader(val_ds, batch_size=args.batch_size)
@@ -328,7 +340,11 @@ if __name__ == "__main__":
         else:
             done = train_epoch(epoch, loader, len(loader), 0, wandb)
         if done: break
-    if args.detailed_eval and is_main_process():
+    if args.task == 'sft' and val_by_lang and is_main_process():
+        lang_losses = {f'val_loss_{lang}': evaluate(loader) for lang, loader in val_by_lang.items()}
+        Logger('loss par langue : ' + '  '.join(f'{k[9:]} {v:.4f}' for k, v in lang_losses.items()))
+        if mlflow: mlflow.log_metrics({f'final_{k}': v for k, v in lang_losses.items()})
+    if args.detailed_eval and args.task == 'pretrain' and is_main_process():
         from trainer.eval_detail import detailed_eval, format_metrics
         # corpus avec un champ `lang` (français / anglais) : loss par langue ; sinon sources du corpus d'origine
         groups = raw_ds.select(sorted(val_idx))['lang'] if 'lang' in raw_ds.column_names else None

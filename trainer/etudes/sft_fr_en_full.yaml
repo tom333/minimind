@@ -1,0 +1,29 @@
+# SFT bilingue complet : 1 epoch des ~773 000 conversations (~250M tokens, ~5 h) avec le réglage
+# retenu par l'étude sft-fr-en-court. Le meilleur modèle en validation est gardé à part (*_best.pth).
+name: sft-fr-en-full
+sampler: grid
+data_file: fr_en/sft_fr_en.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+from_subdir: etude_fr-en-full
+base:
+  task: sft
+  from_weight: fr-en-full-t0
+  system_prompts: fr_en
+  optimizer: muon
+  learning_rate: 1e-4
+  muon_lr: 0.002
+  epochs: 1
+  max_seq_len: 768
+  batch_size: 16
+  accumulation_steps: 2
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  packing: 0
+  use_compile: 1
+  save_resume: 0
+  save_best: 1
+  save_interval: 5000
+  eval_interval: 2000
+  log_interval: 200
+space:
+  seed: [42]

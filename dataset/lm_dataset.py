@@ -7,11 +7,26 @@ import numpy as np
 from datasets import load_dataset, Features, Sequence, Value
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-def pre_processing_chat(conversations, add_system_ratio=0.2):
+# Prompts système ajoutés au hasard pour le corpus bilingue français / anglais
+SYSTEM_PROMPTS_FR_EN = [
+    "Tu es un assistant IA serviable.",
+    "Tu es minimind, un petit modèle de langage utile.",
+    "Tu es un assistant bienveillant. Réponds avec soin aux questions de l'utilisateur.",
+    "Vous êtes un assistant compétent : donnez des informations exactes.",
+    "Tu es minimind, un assistant léger. Fais de ton mieux pour aider.",
+    "You are a helpful AI assistant.",
+    "You are minimind, a lightweight intelligent assistant.",
+    "You are a friendly chatbot. Please answer the user's questions carefully.",
+    "You are a knowledgeable AI. Try your best to provide accurate information.",
+    "You are minimind, a small but useful language model.",
+]
+
+
+def pre_processing_chat(conversations, add_system_ratio=0.2, system_prompts=None):
     # tool use 数据完整保留不做处理
     if any(conv.get('tools') for conv in conversations): return conversations
 
-    SYSTEM_PROMPTS = [
+    SYSTEM_PROMPTS = system_prompts or [
         "你是一个知识丰富的AI，尽力为用户提供准确的信息。",
         "你是minimind，一个小巧但有用的语言模型。",
         "你是一个专业的AI助手，请提供有价值的回答。",
@@ -85,10 +100,11 @@ class PackedPretrainDataset(Dataset):
         return input_ids, input_ids.clone()
 
 class SFTDataset(Dataset):
-    def __init__(self, jsonl_path, tokenizer, max_length=1024):
+    def __init__(self, jsonl_path, tokenizer, max_length=1024, system_prompts=None):
         super().__init__()
         self.tokenizer = tokenizer
         self.max_length = max_length
+        self.system_prompts = system_prompts
         features = Features({'conversations': [{'role': Value('string'), 'content': Value('string'), 'reasoning_content': Value('string'), 'tools': Value('string'), 'tool_calls': Value('string')}]})
         self.samples = load_dataset('json', data_files=jsonl_path, split='train', features=features)
         self.bos_id = tokenizer(f'{tokenizer.bos_token}assistant\n', add_special_tokens=False).input_ids
@@ -134,7 +150,7 @@ class SFTDataset(Dataset):
 
     def __getitem__(self, index):
         sample = self.samples[index]
-        conversations = pre_processing_chat(sample['conversations'])
+        conversations = pre_processing_chat(sample['conversations'], system_prompts=self.system_prompts)
         prompt = self.create_chat_prompt(conversations)
         prompt = post_processing_chat(prompt)
         input_ids = self.tokenizer(prompt).input_ids[:self.max_length]
