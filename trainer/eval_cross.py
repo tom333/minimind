@@ -4,7 +4,10 @@
 Deux mesures par jeu, plus bas = mieux :
   - loss par token, comparable entre modèles qui partagent le même tokenizer ;
   - bits par octet, comparable entre modèles aux tokenizers différents (dont les modèles extérieurs).
-Usage : cd trainer && python eval_cross.py nom1=chemin1.pth nom2=chemin2.pth --tokenizer_path ...
+Un modèle extérieur se désigne par  nom=hf:dépôt  (ex. smollm2=hf:HuggingFaceTB/SmolLM2-135M) : il est lu
+avec son propre tokenizer. Les blocs font SEQ tokens de CHAQUE tokenizer, donc un peu plus ou moins de
+texte selon le modèle ; les bits par octet restent comparables.
+Usage : cd trainer && python eval_cross.py nom1=chemin1.pth nom2=hf:dépôt --tokenizer_path ...
 """
 import argparse
 import json
@@ -22,16 +25,17 @@ SEQ = 340
 
 
 @torch.no_grad()
-def score(model, tokenizer, texts, batch_size=64):
+def score(model, tokenizer, texts, batch_size=64, device="cuda"):
     """Retourne (loss par token, bits par octet) sur une liste de documents, lus par blocs de SEQ tokens."""
     bos, eos = tokenizer.bos_token_id, tokenizer.eos_token_id
+    bos = eos if bos is None else bos  # certains tokenizers n'ont pas de token de début : le séparateur suffit
     ids = [t for doc in tokenizer(texts, add_special_tokens=False).input_ids for t in [bos] + doc + [eos]]
     blocks = torch.tensor(ids[: len(ids) // SEQ * SEQ]).view(-1, SEQ)
     n_bytes = sum(len(t.encode("utf-8")) for t in texts) * (blocks.numel() / len(ids))  # part réellement évaluée
     nll, count = 0.0, 0
     for b in blocks.split(batch_size):
-        b = b.cuda()
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        b = b.to(device)
+        with torch.autocast(device, dtype=torch.bfloat16):
             logits = model(b).logits[:, :-1].float()
         nll += F.cross_entropy(logits.reshape(-1, logits.size(-1)), b[:, 1:].reshape(-1), reduction="sum").item()
         count += b[:, 1:].numel()
@@ -39,12 +43,13 @@ def score(model, tokenizer, texts, batch_size=64):
 
 
 if __name__ == "__main__":
-    from transformers import AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
 
     parser = argparse.ArgumentParser()
     parser.add_argument("models", nargs="+", help="nom=chemin_des_poids")
+    parser.add_argument("--device", default="cuda", help="cpu : mesure possible pendant qu'un entraînement occupe le GPU")
     parser.add_argument("--tokenizer_path", default="../dataset/fr_en/tokenizer_fr65_16k")
     args = parser.parse_args()
 
@@ -53,11 +58,20 @@ if __name__ == "__main__":
     results = {}
     for spec in args.models:
         name, path = spec.split("=", 1)
-        model = MiniMindForCausalLM(MiniMindConfig(vocab_size=len(tok)))
-        model.load_state_dict({k: v.float() for k, v in torch.load(path, map_location="cpu").items()})
-        model = model.cuda().eval()
-        results[name] = {t: score(model, tok, texts) for t, texts in tests.items()}
+        if path.startswith("hf:"):
+            model_tok = AutoTokenizer.from_pretrained(path[3:])
+            model = AutoModelForCausalLM.from_pretrained(path[3:], dtype=torch.bfloat16)
+        else:
+            model_tok = tok
+            model = MiniMindForCausalLM(MiniMindConfig(vocab_size=len(tok)))
+            model.load_state_dict({k: v.float() for k, v in torch.load(path, map_location="cpu").items()})
+        print(f"{name} : {sum(p.numel() for p in model.parameters()) / 1e6:.0f}M paramètres", flush=True)
+        model = model.to(args.device).eval()
+        # petits lots : les logits d'un grand vocabulaire (65k pour LFM3) saturent vite les 12 Go
+        results[name] = {t: score(model, model_tok, texts, batch_size=4, device=args.device) for t, texts in tests.items()}
+        print(f"{name} : " + "  ".join(f"{t} {loss:.3f} / {bpb:.3f}" for t, (loss, bpb) in results[name].items()), flush=True)
         del model
+        torch.cuda.empty_cache()
     names = list(results)
     print(f"{'jeu de test':22}" + "".join(f"{n + ' (loss)':>20}{n + ' (bits/octet)':>24}" for n in names))
     for t in tests:
