@@ -10,6 +10,8 @@ Fichier d'étude (cf. trainer/etudes/*.yaml) :
   sampler: grid                 # grid = toutes les combinaisons ; tpe = recherche guidée ; random
   n_trials: 12                  # ignoré pour grid
   pruner: none                  # none | median (arrête un trial sous la médiane des autres)
+  elagage: {etude: fr-en-court, marge: 0.15, apres: 0.3}   # arrêt si la val_loss dépasse de `marge` la courbe du
+                                # meilleur essai de l'étude citée, au même pas, passé la fraction `apres` de cette courbe
   base: {max_tokens: 50000000}  # arguments communs passés à train_pretrain.py
   data_file: sft_t2t_mini.jsonl # fichier du dossier de données (défaut : pretrain_t2t_mini.jsonl)
   from_subdir: full             # sous-dossier des sorties contenant les poids de départ (--from_weight)
@@ -58,6 +60,15 @@ def suggest(trial, space):
     return args
 
 
+def reference_curve(study_cfg):
+    """Courbe {pas: val_loss} du meilleur essai de l'étude de référence (clé `elagage`), ou None."""
+    spec = study_cfg.get("elagage")
+    if not spec:
+        return None
+    ref = optuna.load_study(study_name=spec["etude"], storage=f"sqlite:///{os.path.abspath(OUT_DIR)}/optuna.db")
+    return ref.best_trial.intermediate_values
+
+
 def run_trial(trial, study_cfg, base):
     args = {**base, **suggest(trial, study_cfg["space"])}
     name = f"{study_cfg['name']}-t{trial.number}"
@@ -91,6 +102,7 @@ def run_trial(trial, study_cfg, base):
     trial.set_user_attr("args", args)
 
     start, value = time.time(), None
+    curve, spec = reference_curve(study_cfg), study_cfg.get("elagage", {})
     with open(os.path.join(out, f"{name}.log"), "w") as log:
         proc = subprocess.Popen(
             cmd, cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
@@ -102,7 +114,16 @@ def run_trial(trial, study_cfg, base):
             if m:
                 value = float(m.group(2))
                 trial.report(value, int(m.group(1)))
-                if trial.should_prune():
+                step = int(m.group(1))
+                too_far = (
+                    curve
+                    and step in curve
+                    and step >= spec.get("apres", 0.3) * max(curve)
+                    and value > curve[step] + spec.get("marge", 0.15)
+                )
+                if too_far:
+                    log.write(f"élagage : val_loss {value:.4f} > référence {curve[step]:.4f} + {spec.get('marge', 0.15)} au pas {step}\n")
+                if too_far or trial.should_prune():
                     proc.terminate()
                     proc.wait()
                     raise optuna.TrialPruned()
