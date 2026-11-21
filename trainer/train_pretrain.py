@@ -22,6 +22,7 @@ from model.model_minimind import MiniMindConfig
 from datasets import load_dataset
 from transformers import AutoTokenizer
 from dataset.lm_dataset import PretrainDataset, PackedPretrainDataset, SFTDataset
+from trainer.diffusion import mdm_loss, set_causal
 from trainer.trainer_utils import get_lr, Logger, is_main_process, lm_checkpoint, init_distributed_mode, setup_seed, init_model, SkipBatchSampler
 
 warnings.filterwarnings('ignore')
@@ -65,12 +66,20 @@ def save_weights(path):
 def evaluate(val_loader):
     random.seed(0)  # SFT : prompt système et balises tirés au hasard par le dataset → validation reproductible
     model.eval()
-    losses = []
+    losses, bounds = [], []
+    gen = torch.Generator(device=args.device).manual_seed(0)  # mêmes masques à chaque évaluation
     for input_ids, labels in val_loader:
+        input_ids = input_ids.to(args.device)
         with autocast_ctx:
-            losses.append(model(input_ids.to(args.device), labels=labels.to(args.device)).loss.item())
+            if args.objective != 'mdm':
+                set_causal(model, True)
+                losses.append(model(input_ids, labels=labels.to(args.device)).loss.item())
+            if args.objective != 'ar':
+                set_causal(model, False)
+                bounds.append(mdm_loss(model, input_ids, generator=gen).item())
     model.train()
-    return sum(losses) / len(losses)
+    if bounds: Logger(f'borne diffusion (nats/token) : {sum(bounds) / len(bounds):.4f}')
+    return sum(losses or bounds) / len(losses or bounds)  # val_loss = loss mot à mot si elle existe
 
 
 def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
@@ -95,9 +104,16 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             lam = min(max((global_step - args.ternary_start * total_steps) / max(args.ternary_ramp * total_steps, 1), 0.0), 1.0)
             for m in ternary_layers: m.lam.fill_(lam)
 
+        # objectif : mot à mot (ar), diffusion masquée (mdm), ou les deux en alternance d'un pas sur l'autre
+        use_mdm = args.objective == 'mdm' or (args.objective == 'both' and step % 2 == 1)
+        if args.objective != 'ar': set_causal(model, not use_mdm)
+        res = None
         with autocast_ctx:
-            res = model(input_ids, labels=labels)
-            loss = res.loss + res.aux_loss
+            if use_mdm:
+                loss = mdm_loss(model, input_ids)
+            else:
+                res = model(input_ids, labels=labels)
+                loss = res.loss + res.aux_loss
             loss = loss / args.accumulation_steps
 
         scaler.scale(loss).backward()
@@ -114,7 +130,7 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
         if step % args.log_interval == 0 or last_step:
             spend_time = time.time() - start_time
             current_loss = loss.item() * args.accumulation_steps
-            current_aux_loss = res.aux_loss.item() if res.aux_loss is not None else 0.0
+            current_aux_loss = 0.0 if use_mdm or res.aux_loss is None else res.aux_loss.item()
             current_logits_loss = current_loss - current_aux_loss
             current_lr = optimizer.param_groups[-1]['lr']
             eta_min = spend_time / max(step - start_step, 1) * (iters - step) // 60
@@ -190,6 +206,7 @@ if __name__ == "__main__":
     parser.add_argument("--ffn_shared", default=0, type=int, choices=[0, 1], help="Un seul FFN partagé par tous les blocs")
     parser.add_argument("--subln", default=0, type=int, choices=[0, 1], help="RMSNorm avant o_proj et down_proj (BitNet)")
     parser.add_argument("--ternary", default="", choices=["", "matrix", "row", "group"], help="Poids ternaires −1/0/+1 dans les blocs (échelle par matrice, par ligne ou par groupe de 128)")
+    parser.add_argument("--objective", default="ar", choices=["ar", "mdm", "both"], help="ar = mot à mot ; mdm = diffusion masquée (attention bidirectionnelle) ; both = alternance")
     parser.add_argument("--ternary_start", default=0.0, type=float, help="Fraction de l'entraînement faite en 16 bits avant de passer au ternaire (0 = ternaire dès le départ)")
     parser.add_argument("--ternary_ramp", default=0.02, type=float, help="Durée (fraction des pas) de la rampe 16 bits → ternaire")
     parser.add_argument("--ternary_hadamard", default=0, type=int, choices=[0, 1], help="Rotation de Walsh-Hadamard de l'entrée des matrices ternaires")
@@ -359,7 +376,8 @@ if __name__ == "__main__":
         lang_losses = {f'val_loss_{lang}': evaluate(loader) for lang, loader in val_by_lang.items()}
         Logger('loss par langue : ' + '  '.join(f'{k[9:]} {v:.4f}' for k, v in lang_losses.items()))
         if mlflow: mlflow.log_metrics({f'final_{k}': v for k, v in lang_losses.items()})
-    if args.detailed_eval and args.task == 'pretrain' and is_main_process():
+    if args.detailed_eval and args.task == 'pretrain' and args.objective != 'mdm' and is_main_process():
+        set_causal(model, True)
         from trainer.eval_detail import detailed_eval, format_metrics
         # corpus avec un champ `lang` (français / anglais) : loss par langue ; sinon sources du corpus d'origine
         groups = raw_ds.select(sorted(val_idx))['lang'] if 'lang' in raw_ds.column_names else None

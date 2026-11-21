@@ -1,0 +1,33 @@
+# Diffusion masquée (MDLM / LLaDA) sur la même architecture de 71M et le même corpus, budget court.
+# La val_loss rapportée est la BORNE de diffusion (nats par token, borne supérieure de la vraie loss) pour
+# les variantes mdm, et la loss mot à mot pour la variante mixte (sa borne est dans le journal du run).
+# Repère mot à mot au même budget : 3.462 (bruit 0.012). Hasard : 9.68.
+#   mdm-zero      : diffusion depuis zéro
+#   mdm-depuis-ar : diffusion en partant du modèle mot à mot complet (1,02 Md tokens) — adaptation
+#   mixte         : un seul modèle, un pas sur deux en mot à mot et l'autre en diffusion
+name: diffusion
+sampler: grid
+from_subdir: etude_fr-en-full
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 0
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+space:
+  variante:
+    mdm-zero: {objective: mdm}
+    mdm-depuis-ar: {objective: mdm, from_weight: fr-en-full-t0}
+    mixte: {objective: both}
