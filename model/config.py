@@ -90,3 +90,6 @@ class MiniMindConfig(PretrainedConfig):
         # SubLN (BitNet) : RMSNorm supplémentaire sur l'entrée des projections de sortie (o_proj, down_proj),
         # pour stabiliser l'échelle des activations quand les poids sont ternaires.
         self.subln = kwargs.get("subln", False)
+        # Un seul FFN partagé par tous les blocs (Apple, « One Wide FFN Is All You Need », 2023) :
+        # même calcul par token, mais les paramètres du FFN ne sont stockés qu'une fois.
+        self.ffn_shared = kwargs.get("ffn_shared", False)

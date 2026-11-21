@@ -105,6 +105,9 @@ class MiniMindModel(nn.Module):
         self.layers = nn.ModuleList(
             [MiniMindBlock(l, config) for l in range(self.num_hidden_layers)]
         )
+        if getattr(config, "ffn_shared", False):  # tous les blocs consultent la même « mémoire »
+            for layer in self.layers[1:]:
+                layer.mlp = self.layers[0].mlp
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         if getattr(config, "ternary", ""):  # matrices des blocs en −1/0/+1 (embedding et sortie restent précis)
             convert_to_ternary(self.layers, scale_mode=config.ternary, hadamard=getattr(config, "ternary_hadamard", False))

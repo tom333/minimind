@@ -1,0 +1,28 @@
+# Un seul FFN partagé par les 8 blocs (Apple, « One Wide FFN Is All You Need », 2023), budget court.
+# Le calcul par token ne change pas à largeur égale ; ce sont les paramètres (donc la mémoire) qui baissent.
+# Références au même budget : SwiGLU non partagé 71,3M = 3.462 ; ReLU² à largeur égale 56,3M = 3.495.
+# Bruit : 0.012. Question : que coûte le partage, et un FFN partagé plus large le rattrape-t-il ?
+name: ffn-partage
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+space:
+  variante:
+    partage-2432: {ffn_shared: 1}                            # 32,1M, même calcul que la référence
+    partage-3648: {ffn_shared: 1, intermediate_size: 3648}   # 34,9M, FFN ×1,5 en calcul
