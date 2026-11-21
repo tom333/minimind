@@ -369,6 +369,7 @@ if __name__ == "__main__":
             metrics['ternary_zero_frac'] = sum(stats) / len(stats)
         Logger(format_metrics(metrics) + (f"\nternaire : {metrics['ternary_zero_frac']:.1%} de zéros" if ternary_layers else ''))
         if mlflow: mlflow.log_metrics({f'final_{k}': v for k, v in metrics.items()})
+    if mlflow and torch.cuda.is_available(): mlflow.log_metric('final_gpu_mem_go', torch.cuda.max_memory_allocated() / 2**30)
     if mlflow: mlflow.end_run()
     
     # ========== 9. 清理分布进程 ==========

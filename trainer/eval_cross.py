@@ -42,6 +42,18 @@ def score(model, tokenizer, texts, batch_size=64, device="cuda"):
     return nll / count, nll / math.log(2) / n_bytes
 
 
+def log_mlflow(experiment, name, path, scores):
+    """Un run par modèle évalué : {jeu: (loss, bits par octet)} → métriques loss_<jeu> et bpb_<jeu>."""
+    import mlflow
+
+    mlflow.set_tracking_uri(os.environ.get("MINIMIND_MLFLOW_URI", "https://mlflow.tgu.ovh"))
+    mlflow.set_experiment(experiment)
+    with mlflow.start_run(run_name=name):
+        mlflow.log_params({"modele": path, "seq": SEQ})
+        for test, (loss, bpb) in scores.items():
+            mlflow.log_metrics({f"loss_{test}": loss, f"bpb_{test}": bpb})
+
+
 if __name__ == "__main__":
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -49,6 +61,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("models", nargs="+", help="nom=chemin_des_poids")
+    parser.add_argument("--mlflow_experiment", default="", help="si renseigné : un run MLflow par modèle (bpb_<jeu>, loss_<jeu>)")
     parser.add_argument("--device", default="cuda", help="cpu : mesure possible pendant qu'un entraînement occupe le GPU")
     parser.add_argument("--tokenizer_path", default="../dataset/fr_en/tokenizer_fr65_16k")
     args = parser.parse_args()
@@ -70,6 +83,8 @@ if __name__ == "__main__":
         # petits lots : les logits d'un grand vocabulaire (65k pour LFM3) saturent vite les 12 Go
         results[name] = {t: score(model, model_tok, texts, batch_size=4, device=args.device) for t, texts in tests.items()}
         print(f"{name} : " + "  ".join(f"{t} {loss:.3f} / {bpb:.3f}" for t, (loss, bpb) in results[name].items()), flush=True)
+        if args.mlflow_experiment:
+            log_mlflow(args.mlflow_experiment, name, path, results[name])
         del model
         torch.cuda.empty_cache()
     names = list(results)
