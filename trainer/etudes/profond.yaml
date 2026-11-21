@@ -1,0 +1,27 @@
+# Plus de profondeur à paramètres égaux (blocs plus nombreux, FFN plus étroit). L'étude FFN a donné
+# 10 blocs × FFN 1792 = 3.447 contre 3.462 pour la référence (−0,015, à la limite du bruit de 0.012) :
+# on prolonge la tendance pour voir si elle se confirme et où elle s'arrête.
+name: profond
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+space:
+  variante:
+    12blocs-ffn1344: {num_hidden_layers: 12, intermediate_size: 1344}   # 70.7M
+    16blocs-ffn832: {num_hidden_layers: 16, intermediate_size: 832}    # 71.3M

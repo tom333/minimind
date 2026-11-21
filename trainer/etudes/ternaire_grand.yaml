@@ -1,0 +1,30 @@
+# Poids ternaires, premier point « plus grand à mémoire inférieure » : 104.2M paramètres ternaires
+# (~50 Mo, embedding 16 bits compris) contre 143 Mo pour la référence 16 bits de 71,3M. Taux d'apprentissage ×2
+# (meilleur réglage de la phase 1). Budget court (50M tokens), défavorable à un modèle plus gros.
+# Repères : 16 bits 71M = 3.462 ; ternaire 71M (LR ×2) = 3.562. Bruit : 0.012.
+name: ternaire-grand
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+  ternary: row
+  muon_lr: 0.02
+  learning_rate: 1.5e-3
+space:
+  variante:
+    ternaire-896x9: {hidden_size: 896, num_hidden_layers: 9}

@@ -1,0 +1,30 @@
+# Mixture-of-Depths à TEMPS de calcul voisin de la référence : le temps gagné par le routage est réinvesti
+# dans un modèle plus profond ou plus large. Coût estimé en « blocs pleins » : blocs denses + capacité ×
+# blocs routés (la référence en vaut 8) ; le temps réel par pas est dans MLflow (tokens_per_sec).
+# Référence (8 blocs denses, 71,3M, 50M tokens) : 3.462. Bruit : 0.012. val_loss en décision causale.
+name: mod-iso
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+space:
+  variante:
+    mod50-10blocs: {mod_capacity: 0.5, num_hidden_layers: 10}     # 86.0M, ~7,5 blocs pleins
+    mod25-12blocs: {mod_capacity: 0.25, num_hidden_layers: 12}    # 100.8M, ~7,5 blocs pleins
+    mod12-14blocs: {mod_capacity: 0.125, num_hidden_layers: 14}   # 115.5M, ~7,9 blocs pleins
+    mod25-large960: {mod_capacity: 0.25, hidden_size: 960}          # 108.3M, 8 blocs plus larges
