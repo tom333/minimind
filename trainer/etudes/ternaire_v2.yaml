@@ -1,5 +1,6 @@
 # Poids ternaires, phase 1 : recette et architecture adaptées au ternaire, à taille fixe (71M), 50M tokens.
 # Référence 16 bits : fr-en-court = 3.462. Le ternaire avec la recette 16 bits sert de point de départ.
+# Échelles par groupe de 128 et rotation de Hadamard : reprises de Ternary Bonsai 2 (PrismML, 2026).
 # Phase 2 (après) : agrandir le meilleur ternaire à mémoire d'inférence égale ou inférieure au 16 bits.
 name: ternaire-v2
 sampler: grid
@@ -24,7 +25,9 @@ base:
   ternary: row
 space:
   variante:
-    recette-16bits: {}
-    archi-bitnet: {subln: 1, ffn_glu: 0, hidden_act: relu2, intermediate_size: 3648}  # SubLN + ReLU²
-    muon-fort: {muon_lr: 0.02, learning_rate: 1.5e-3}                                # LR ×2
-    archi-bitnet-muon-fort: {subln: 1, ffn_glu: 0, hidden_act: relu2, intermediate_size: 3648, muon_lr: 0.02, learning_rate: 1.5e-3}
+    recette-16bits: {}                                                   # échelle par ligne (fiche 11)
+    groupe-128: {ternary: group}
+    groupe-hadamard: {ternary: group, ternary_hadamard: 1}
+    archi-bitnet: {subln: 1, ffn_glu: 0, hidden_act: relu2, intermediate_size: 3584}  # SubLN + ReLU², 70,5M
+    muon-fort: {muon_lr: 0.02, learning_rate: 1.5e-3}                    # LR ×2
+    tout: {ternary: group, ternary_hadamard: 1, subln: 1, ffn_glu: 0, hidden_act: relu2, intermediate_size: 3584, muon_lr: 0.02, learning_rate: 1.5e-3}

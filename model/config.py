@@ -82,7 +82,8 @@ class MiniMindConfig(PretrainedConfig):
         self.memory_query_dim = kwargs.get("memory_query_dim", 256)
         # Poids ternaires (cf. ternary.TernaryLinear) pour les matrices des blocs :
         # "" = désactivé (origine), "matrix" = une échelle par matrice, "row" = une échelle par neurone.
-        self.ternary = kwargs.get("ternary", "")
+        self.ternary = kwargs.get("ternary", "")  # "" | matrix | row | group (groupes de 128)
+        self.ternary_hadamard = kwargs.get("ternary_hadamard", False)  # rotation de l'entrée (Bonsai 2)
         # FFN sans porte (2 matrices au lieu de 3) : down(act(up(x))), avec hidden_act="relu2" (Primer,
         # BitNet b1.58 2B4T, speedrun nanoGPT). ffn_glu=True = SwiGLU d'origine.
         self.ffn_glu = kwargs.get("ffn_glu", True)

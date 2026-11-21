@@ -107,7 +107,7 @@ class MiniMindModel(nn.Module):
         )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         if getattr(config, "ternary", ""):  # matrices des blocs en −1/0/+1 (embedding et sortie restent précis)
-            convert_to_ternary(self.layers, scale_per_row=config.ternary == "row")
+            convert_to_ternary(self.layers, scale_mode=config.ternary, hadamard=getattr(config, "ternary_hadamard", False))
         # cos/sin RoPE précalculés : buffers (déplacés sur GPU avec le modèle) mais pas des poids
         # appris, et non sauvegardés (persistent=False)
         freqs_cos, freqs_sin = precompute_freqs_cis(

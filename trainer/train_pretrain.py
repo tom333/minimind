@@ -185,7 +185,8 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_act", default="silu", help="Activation du FFN (silu, relu2, gelu…)")
     parser.add_argument("--ffn_glu", default=1, type=int, choices=[0, 1], help="1 = FFN à porte (SwiGLU, 3 matrices) ; 0 = down(act(up(x))), 2 matrices")
     parser.add_argument("--subln", default=0, type=int, choices=[0, 1], help="RMSNorm avant o_proj et down_proj (BitNet)")
-    parser.add_argument("--ternary", default="", choices=["", "matrix", "row"], help="Poids ternaires −1/0/+1 dans les blocs (échelle par matrice ou par ligne)")
+    parser.add_argument("--ternary", default="", choices=["", "matrix", "row", "group"], help="Poids ternaires −1/0/+1 dans les blocs (échelle par matrice, par ligne ou par groupe de 128)")
+    parser.add_argument("--ternary_hadamard", default=0, type=int, choices=[0, 1], help="Rotation de Walsh-Hadamard de l'entrée des matrices ternaires")
     parser.add_argument("--tokenizer_path", default="../model", type=str, help="Dossier du tokenizer (le vocabulaire du modèle en découle)")
     parser.add_argument("--system_prompts", default="zh", choices=["zh", "fr_en"], help="SFT : liste des prompts système ajoutés au hasard (zh = liste d'origine)")
     parser.add_argument("--task", default="pretrain", choices=["pretrain", "sft"], help="pretrain = texte brut ; sft = conversations (loss sur les réponses de l'assistant)")
@@ -217,7 +218,7 @@ if __name__ == "__main__":
     os.makedirs(args.save_dir, exist_ok=True)
     arch_overrides = {k: getattr(args, k) for k in ('num_attention_heads', 'num_key_value_heads', 'intermediate_size') if getattr(args, k) is not None}
     if args.logit_softcap: arch_overrides['logit_softcap'] = args.logit_softcap
-    if args.ternary: arch_overrides['ternary'] = args.ternary
+    if args.ternary: arch_overrides.update(ternary=args.ternary, ternary_hadamard=bool(args.ternary_hadamard))
     arch_overrides.update(hidden_act=args.hidden_act, ffn_glu=bool(args.ffn_glu), subln=bool(args.subln))
     if args.memory_layers: arch_overrides.update(memory_layers=tuple(int(v) for v in args.memory_layers.split(',')), memory_keys=args.memory_keys)
     if args.ffn_btt_rank: arch_overrides.update(ffn_btt_rank=args.ffn_btt_rank, ffn_btt_mid=tuple(int(v) for v in args.ffn_btt_mid.split(',')))
