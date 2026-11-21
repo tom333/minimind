@@ -98,6 +98,7 @@ class Attention(nn.Module):
         past_key_value=None,
         use_cache=False,
         attention_mask=None,
+        key_mask=None,
     ):
         # Shapes indiquées pour batch=1, seq_len=10
         bsz, seq_len, _ = x.shape  # x : [1, 10, 768]
@@ -132,7 +133,15 @@ class Attention(nn.Module):
         )
         # Chemin rapide : Flash Attention (kernel GPU optimisé, même calcul, ne matérialise
         # pas la matrice seq×seq). Utilisé si pas de cache ni de padding.
-        if (
+        if key_mask is not None:
+            # Mixture-of-Depths à l'évaluation : seuls les tokens retenus (key_mask [batch, seq], booléen)
+            # servent de clés. Masque causal ET clés retenues ; chaque token se voit toujours lui-même,
+            # pour qu'aucune ligne ne soit vide (les lignes des tokens non retenus sont ignorées ensuite).
+            causal = torch.ones(seq_len, seq_len, dtype=torch.bool, device=x.device).tril()
+            eye = torch.eye(seq_len, dtype=torch.bool, device=x.device)
+            mask = (causal & key_mask[:, None, None, :]) | eye
+            output = F.scaled_dot_product_attention(xq, xk, xv, attn_mask=mask)
+        elif (
             self.flash
             and (seq_len > 1)
             and (not self.is_causal or past_key_value is None)

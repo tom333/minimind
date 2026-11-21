@@ -1,0 +1,32 @@
+# À TEMPS DE CALCUL ÉGAL, sur un budget intermédiaire : chaque variante reçoit le nombre de tokens qu'elle
+# traite dans le temps où la référence en traite 200M (débits du banc trainer/bench_speed.py, 22/11/2026).
+# Question : une variante plus rapide mais un peu moins bonne par token rattrape-t-elle la référence quand
+# on réinvestit le temps gagné en tokens ? À 50M tokens la réponse serait trivialement oui (pente très forte) ;
+# à 1 Md elle est incertaine (pente faible). 200M est le premier point intermédiaire.
+# Repères à 50M tokens : référence 3.459 (2 graines), 10 blocs 3.448, ReLU² 3.495, MoD 25 % 3.529. Bruit : 0.012.
+name: regime
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 200000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 1000
+  log_interval: 200
+  seed: 42
+space:
+  variante:
+    reference: {}                                                                  # 36,3k tokens/s
+    dix-blocs: {num_hidden_layers: 10, intermediate_size: 1792, max_tokens: 211000000}   # +5,6 %
+    relu2-largeur: {ffn_glu: 0, hidden_act: relu2, max_tokens: 248000000}            # +23,9 %
+    mod-25: {mod_capacity: 0.25, max_tokens: 281000000}                              # +40,6 %

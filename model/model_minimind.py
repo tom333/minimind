@@ -88,8 +88,7 @@ class MiniMindBlock(nn.Module):
             return hidden_states.scatter_add(1, gather_idx, delta.to(hidden_states.dtype)), None
         keep = score > 0  # décision causale
         self.keep_rate = keep.float().mean()
-        mask = keep.to(hidden_states.dtype) if attention_mask is None else keep.to(hidden_states.dtype) * attention_mask
-        out, _ = self.block(hidden_states, position_embeddings, attention_mask=mask)  # clés = tokens retenus
+        out, _ = self.block(hidden_states, position_embeddings, key_mask=keep)  # clés = tokens retenus
         delta = (out - hidden_states) * score.unsqueeze(-1)
         return torch.where(keep.unsqueeze(-1), hidden_states + delta.to(hidden_states.dtype), hidden_states), None
 
@@ -100,6 +99,7 @@ class MiniMindBlock(nn.Module):
         past_key_value=None,
         use_cache=False,
         attention_mask=None,
+        key_mask=None,
     ):
         residual = hidden_states
         hidden_states, present_key_value = self.self_attn(
@@ -108,6 +108,7 @@ class MiniMindBlock(nn.Module):
             past_key_value,
             use_cache,
             attention_mask,
+            key_mask,
         )
         hidden_states += residual  # résiduel après attention
         normed = self.post_attention_layernorm(hidden_states)
