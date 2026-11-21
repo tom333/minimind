@@ -82,8 +82,12 @@ def evaluate(val_loader):
     return sum(losses or bounds) / len(losses or bounds)  # val_loss = loss mot à mot si elle existe
 
 
+eval_seconds = [0.0]  # temps passé en évaluation depuis le début de l'epoch
+
+
 def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
     start_time = time.time()
+    eval_seconds[0] = 0.0
     for step, (input_ids, labels) in enumerate(loader, start=start_step + 1):
         global_step = epoch * iters + step
         last_step = step == iters or global_step >= total_steps
@@ -136,10 +140,12 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             eta_min = spend_time / max(step - start_step, 1) * (iters - step) // 60
             Logger(f'Epoch:[{epoch + 1}/{args.epochs}]({step}/{iters}), loss: {current_loss:.4f}, logits_loss: {current_logits_loss:.4f}, aux_loss: {current_aux_loss:.4f}, lr: {current_lr:.8f}, epoch_time: {eta_min:.1f}min')
             if wandb: wandb.log({"loss": current_loss, "logits_loss": current_logits_loss, "aux_loss": current_aux_loss, "learning_rate": current_lr, "epoch_time": eta_min})
-            if mlflow: mlflow.log_metrics({"train_loss": current_loss, "learning_rate": current_lr, "tokens_seen": global_step * tokens_per_step, "tokens_per_sec": (step - start_step) * tokens_per_step / spend_time}, step=global_step)
+            if mlflow: mlflow.log_metrics({"train_loss": current_loss, "learning_rate": current_lr, "tokens_seen": global_step * tokens_per_step, "tokens_per_sec": (step - start_step) * tokens_per_step / spend_time, "train_tokens_per_sec": (step - start_step) * tokens_per_step / max(spend_time - eval_seconds[0], 1e-9)}, step=global_step)
 
         if val_loader is not None and (step % args.eval_interval == 0 or last_step):
+            eval_start = time.time()
             val_loss = evaluate(val_loader)
+            eval_seconds[0] += time.time() - eval_start  # exclu du débit d'entraînement
             Logger(f'step {global_step}: val_loss {val_loss:.4f}')
             if mlflow: mlflow.log_metric("val_loss", val_loss, step=global_step)
             if args.save_best and val_loss < best['val_loss'] and is_main_process():

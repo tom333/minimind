@@ -40,6 +40,12 @@ VARIANTS = {
     "mod-50 (math)": dict(arch=dict(mod_capacity=0.5)),  # Mixture-of-Depths, un bloc sur deux
     "mod-25 (math)": dict(arch=dict(mod_capacity=0.25)),
     "mod-12 (math)": dict(arch=dict(mod_capacity=0.125)),
+    # modèles agrandis de l'étude mod-iso : leur temps par pas doit rester voisin de la référence
+    "mod50-10blocs": dict(arch=dict(mod_capacity=0.5, num_hidden_layers=10)),
+    "mod25-12blocs": dict(arch=dict(mod_capacity=0.25, num_hidden_layers=12)),
+    "mod12-14blocs": dict(arch=dict(mod_capacity=0.125, num_hidden_layers=14)),
+    "mod25-large960": dict(arch=dict(mod_capacity=0.25, hidden_size=960)),
+    "10blocs-ffn1792": dict(arch=dict(num_hidden_layers=10, intermediate_size=1792)),
     # prochaine marche : ~150M paramètres (largeur 1024, 10 blocs). Temps par pas et mémoire réels.
     "150M": dict(arch=dict(hidden_size=1024, num_hidden_layers=10)),
     "150M lot-32": dict(arch=dict(hidden_size=1024, num_hidden_layers=10), batch=32),
