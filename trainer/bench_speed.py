@@ -37,6 +37,9 @@ VARIANTS = {
     "relu2-meme-largeur (math)": dict(
         arch=dict(ffn_glu=False, hidden_act="relu2")
     ),  # repère structurel
+    "mod-50 (math)": dict(arch=dict(mod_capacity=0.5)),  # Mixture-of-Depths, un bloc sur deux
+    "mod-25 (math)": dict(arch=dict(mod_capacity=0.25)),
+    "mod-12 (math)": dict(arch=dict(mod_capacity=0.125)),
     "lot-128 (math)": dict(
         batch=128
     ),  # débit par token d'un lot double (la loss par token en pâtit, étude 04)
@@ -86,7 +89,8 @@ def measure(
             torch.cuda.synchronize()
             t0 = time.perf_counter()
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            loss = fn(x, labels=x).loss
+            out = fn(x, labels=x)
+            loss = out.loss + out.aux_loss
         loss.backward()
         if clip:
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

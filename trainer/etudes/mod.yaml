@@ -1,0 +1,30 @@
+# Mixture-of-Depths (Raposo et al. 2024) : dans un bloc sur deux, seule une part des tokens traverse le
+# bloc (attention + FFN), choisie par un routeur. Objectif : un pas d'entraînement plus court.
+# La val_loss est mesurée avec la décision CAUSALE du routeur (note > 0), pas avec le top-k de l'entraînement.
+# Référence au même budget (50M tokens) : 3.462, pas de ~594 ms. Bruit : 0.012.
+# À juger sur le couple (val_loss, temps) : voir aussi trainer/bench_speed.py pour le temps par pas.
+name: mod
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+space:
+  variante:
+    capacite-50: {mod_capacity: 0.5}
+    capacite-25: {mod_capacity: 0.25}
+    capacite-12: {mod_capacity: 0.125}    # réglage retenu par le papier (séquences de 2048 tokens)

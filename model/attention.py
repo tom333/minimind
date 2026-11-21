@@ -115,7 +115,8 @@ class Attention(nn.Module):
         )  # [1, 10, 4, 96]
         xq, xk = self.q_norm(xq), self.k_norm(xk)
         cos, sin = position_embeddings
-        xq, xk = apply_rotary_pos_emb(xq, xk, cos, sin)  # position via rotation
+        # cos/sin [seq, dim] en général ; [batch, seq, dim] quand chaque séquence a ses propres positions (MoD)
+        xq, xk = apply_rotary_pos_emb(xq, xk, cos, sin, unsqueeze_dim=cos.dim() - 1)  # position via rotation
         # KV-cache : on concatène K/V du passé avec ceux des nouveaux tokens
         if past_key_value is not None:
             xk = torch.cat([past_key_value[0], xk], dim=1)

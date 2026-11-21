@@ -61,8 +61,39 @@ class MiniMindBlock(nn.Module):
         self.mlp = FeedForward(config) if not config.use_moe else MOEFeedForward(config)
         # couche mémoire optionnelle, en parallèle du FFN (même entrée normalisée, sortie ajoutée)
         self.memory = MemoryLayer(config) if layer_id in getattr(config, "memory_layers", ()) else None
+        # Mixture-of-Depths : un bloc sur deux (les impairs) est « routé ». Le routeur donne une note par
+        # token ; à l'entraînement les mod_capacity·S mieux notés traversent le bloc (formes fixes, donc
+        # rapide), les autres gardent leur valeur. Une loss auxiliaire apprend au routeur à ce que
+        # « note > 0 » prédise ce choix : à l'évaluation, la décision ne dépend plus du futur.
+        self.mod_capacity = getattr(config, "mod_capacity", 0.0) if layer_id % 2 == 1 else 0.0
+        self.mod_aux_coef = getattr(config, "mod_aux_coef", 0.01)
+        self.router = nn.Linear(config.hidden_size, 1, bias=False) if self.mod_capacity else None
+        self.aux_loss = 0.0
 
-    def forward(
+    def forward(self, hidden_states, position_embeddings, past_key_value=None, use_cache=False, attention_mask=None):
+        if self.router is None:
+            return self.block(hidden_states, position_embeddings, past_key_value, use_cache, attention_mask)
+        assert past_key_value is None and not use_cache, "Mixture-of-Depths : génération avec cache non gérée"
+        score = self.router(hidden_states).squeeze(-1)  # [batch, seq]
+        if self.training:
+            k = max(1, int(hidden_states.size(1) * self.mod_capacity))
+            idx = score.topk(k, dim=1).indices.sort(dim=1).values  # tokens retenus, dans l'ordre du texte
+            gather_idx = idx.unsqueeze(-1).expand(-1, -1, hidden_states.size(-1))
+            chosen = hidden_states.gather(1, gather_idx)
+            cos, sin = position_embeddings
+            out, _ = self.block(chosen, (cos[idx], sin[idx]))  # chaque token garde sa position d'origine
+            delta = (out - chosen) * score.gather(1, idx).unsqueeze(-1)
+            target = torch.zeros_like(score).scatter(1, idx, 1.0)
+            self.aux_loss = self.mod_aux_coef * F.binary_cross_entropy_with_logits(score.float(), target.float())
+            return hidden_states.scatter_add(1, gather_idx, delta.to(hidden_states.dtype)), None
+        keep = score > 0  # décision causale
+        self.keep_rate = keep.float().mean()
+        mask = keep.to(hidden_states.dtype) if attention_mask is None else keep.to(hidden_states.dtype) * attention_mask
+        out, _ = self.block(hidden_states, position_embeddings, attention_mask=mask)  # clés = tokens retenus
+        delta = (out - hidden_states) * score.unsqueeze(-1)
+        return torch.where(keep.unsqueeze(-1), hidden_states + delta.to(hidden_states.dtype), hidden_states), None
+
+    def block(
         self,
         hidden_states,
         position_embeddings,
@@ -170,7 +201,8 @@ class MiniMindModel(nn.Module):
             presents.append(present)
         hidden_states = self.norm(hidden_states)
         aux_loss = sum(
-            [l.mlp.aux_loss for l in self.layers if isinstance(l.mlp, MOEFeedForward)],
+            [l.mlp.aux_loss for l in self.layers if isinstance(l.mlp, MOEFeedForward)]
+            + [l.aux_loss for l in self.layers if l.router is not None and self.training],
             hidden_states.new_zeros(1).squeeze(),
         )
         return hidden_states, presents, aux_loss

@@ -93,3 +93,7 @@ class MiniMindConfig(PretrainedConfig):
         # Un seul FFN partagé par tous les blocs (Apple, « One Wide FFN Is All You Need », 2023) :
         # même calcul par token, mais les paramètres du FFN ne sont stockés qu'une fois.
         self.ffn_shared = kwargs.get("ffn_shared", False)
+        # Mixture-of-Depths (Raposo et al. 2024) : dans un bloc sur deux, seule une fraction mod_capacity
+        # des tokens (choisis par un routeur) traverse le bloc ; les autres le contournent. 0 = désactivé.
+        self.mod_capacity = kwargs.get("mod_capacity", 0.0)
+        self.mod_aux_coef = kwargs.get("mod_aux_coef", 0.01)
