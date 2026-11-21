@@ -78,6 +78,11 @@ class Attention(nn.Module):
             self.head_dim, eps=config.rms_norm_eps
         )  # QK-norm (Qwen3) : stabilise l'attention
         self.k_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.sub_norm = (
+            RMSNorm(config.num_attention_heads * self.head_dim, eps=config.rms_norm_eps)
+            if config.subln
+            else nn.Identity()
+        )  # SubLN (BitNet), cf. config.subln
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
         self.dropout = config.dropout
@@ -158,5 +163,5 @@ class Attention(nn.Module):
         output = output.transpose(1, 2).reshape(
             bsz, seq_len, -1
         )  # recolle les têtes → [1, 10, 768]
-        output = self.resid_dropout(self.o_proj(output))  # mélange final des têtes
+        output = self.resid_dropout(self.o_proj(self.sub_norm(output)))  # mélange final des têtes
         return output, past_kv

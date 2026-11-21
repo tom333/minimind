@@ -83,3 +83,9 @@ class MiniMindConfig(PretrainedConfig):
         # Poids ternaires (cf. ternary.TernaryLinear) pour les matrices des blocs :
         # "" = désactivé (origine), "matrix" = une échelle par matrice, "row" = une échelle par neurone.
         self.ternary = kwargs.get("ternary", "")
+        # FFN sans porte (2 matrices au lieu de 3) : down(act(up(x))), avec hidden_act="relu2" (Primer,
+        # BitNet b1.58 2B4T, speedrun nanoGPT). ffn_glu=True = SwiGLU d'origine.
+        self.ffn_glu = kwargs.get("ffn_glu", True)
+        # SubLN (BitNet) : RMSNorm supplémentaire sur l'entrée des projections de sortie (o_proj, down_proj),
+        # pour stabiliser l'échelle des activations quand les poids sont ternaires.
+        self.subln = kwargs.get("subln", False)

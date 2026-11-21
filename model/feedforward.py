@@ -6,6 +6,7 @@ from torch import nn
 from transformers.activations import ACT2FN
 
 from .config import MiniMindConfig
+from .norm import RMSNorm
 
 
 # -------------------------------------------------------------------------------------
@@ -64,13 +65,17 @@ class FeedForward(nn.Module):
             self.up_proj = BTTLinear((h1, h2), (m1, m2), r, std)
             self.down_proj = BTTLinear((m2, m1), (h2, h1), r, std)
         else:
-            self.gate_proj = nn.Linear(config.hidden_size, intermediate_size, bias=False)
+            if config.ffn_glu:
+                self.gate_proj = nn.Linear(config.hidden_size, intermediate_size, bias=False)
             self.down_proj = nn.Linear(intermediate_size, config.hidden_size, bias=False)
             self.up_proj = nn.Linear(config.hidden_size, intermediate_size, bias=False)
         self.act_fn = ACT2FN[config.hidden_act]
+        self.glu = config.ffn_glu
+        self.sub_norm = RMSNorm(intermediate_size, eps=config.rms_norm_eps) if config.subln else nn.Identity()
 
     def forward(self, x):
-        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+        h = self.act_fn(self.gate_proj(x)) * self.up_proj(x) if self.glu else self.act_fn(self.up_proj(x))
+        return self.down_proj(self.sub_norm(h))
 
 
 # -------------------------------------------------------------------------------------

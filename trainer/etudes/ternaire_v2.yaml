@@ -1,0 +1,30 @@
+# Poids ternaires, phase 1 : recette et architecture adaptées au ternaire, à taille fixe (71M), 50M tokens.
+# Référence 16 bits : fr-en-court = 3.462. Le ternaire avec la recette 16 bits sert de point de départ.
+# Phase 2 (après) : agrandir le meilleur ternaire à mémoire d'inférence égale ou inférieure au 16 bits.
+name: ternaire-v2
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+  ternary: row
+space:
+  variante:
+    recette-16bits: {}
+    archi-bitnet: {subln: 1, ffn_glu: 0, hidden_act: relu2, intermediate_size: 3648}  # SubLN + ReLU²
+    muon-fort: {muon_lr: 0.02, learning_rate: 1.5e-3}                                # LR ×2
+    archi-bitnet-muon-fort: {subln: 1, ffn_glu: 0, hidden_act: relu2, intermediate_size: 3648, muon_lr: 0.02, learning_rate: 1.5e-3}
