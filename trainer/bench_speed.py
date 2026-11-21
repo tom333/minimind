@@ -40,6 +40,12 @@ VARIANTS = {
     "mod-50 (math)": dict(arch=dict(mod_capacity=0.5)),  # Mixture-of-Depths, un bloc sur deux
     "mod-25 (math)": dict(arch=dict(mod_capacity=0.25)),
     "mod-12 (math)": dict(arch=dict(mod_capacity=0.125)),
+    # prochaine marche : ~150M paramètres (largeur 1024, 10 blocs). Temps par pas et mémoire réels.
+    "150M": dict(arch=dict(hidden_size=1024, num_hidden_layers=10)),
+    "150M lot-32": dict(arch=dict(hidden_size=1024, num_hidden_layers=10), batch=32),
+    "150M mod-50": dict(arch=dict(hidden_size=1024, num_hidden_layers=10, mod_capacity=0.5)),
+    "150M mod-25": dict(arch=dict(hidden_size=1024, num_hidden_layers=10, mod_capacity=0.25)),
+    "150M mod-25 tf32+fused": dict(arch=dict(hidden_size=1024, num_hidden_layers=10, mod_capacity=0.25), tf32=True, fused=True),
     "lot-128 (math)": dict(
         batch=128
     ),  # débit par token d'un lot double (la loss par token en pâtit, étude 04)
