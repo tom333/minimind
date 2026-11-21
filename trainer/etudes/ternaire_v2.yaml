@@ -30,4 +30,4 @@ space:
     groupe-hadamard: {ternary: group, ternary_hadamard: 1}
     archi-bitnet: {subln: 1, ffn_glu: 0, hidden_act: relu2, intermediate_size: 3584}  # SubLN + ReLU², 70,5M
     muon-fort: {muon_lr: 0.02, learning_rate: 1.5e-3}                    # LR ×2
-    tout: {ternary: group, ternary_hadamard: 1, subln: 1, ffn_glu: 0, hidden_act: relu2, intermediate_size: 3584, muon_lr: 0.02, learning_rate: 1.5e-3}
+    bascule-90: {ternary_start: 0.9, ternary_ramp: 0.02}                 # 16 bits 90 % puis ternaire (ParetoQ)

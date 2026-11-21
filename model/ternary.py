@@ -35,14 +35,20 @@ class TernaryLinear(nn.Linear):
     scale_mode = "matrix"  # matrix | row | group ; réglé par convert_to_ternary
     hadamard = False
 
-    def ternary_weight(self):
+    def trits(self):
+        """Poids arrondis à −1/0/+1 (avant multiplication par l'échelle) et échelle, à la forme de groupage."""
         w = self.weight
         if self.scale_mode == "group":
             w = w.view(w.size(0), -1, GROUP)
         dims = {"matrix": None, "row": 1, "group": 2}[self.scale_mode]
         scale = w.abs().mean(dim=dims, keepdim=True).clamp(min=1e-5)
-        w_q = (w / scale).round().clamp(-1, 1) * scale
-        return (w + (w_q - w).detach()).view_as(self.weight)  # forward : w_q ; backward : gradient de w
+        return (w / scale).round().clamp(-1, 1), scale, w
+
+    def ternary_weight(self):
+        t, scale, w = self.trits()
+        # lam = part d'arrondi appliquée (buffer : modifiable sans recompilation) ; 1 = ternaire complet.
+        # Basculement progressif 16 bits → ternaire en fin d'entraînement (ParetoQ, Nielsen et al. 2025).
+        return (w + self.lam * (t * scale - w).detach()).view_as(self.weight)  # backward : gradient de w
 
     def rotate(self, x):
         b = self.rot.size(0)
@@ -63,6 +69,7 @@ def convert_to_ternary(module: nn.Module, scale_mode: str = "matrix", hadamard: 
             m.scale_mode = scale_mode
             assert scale_mode != "group" or m.in_features % GROUP == 0
             m.hadamard = hadamard
+            m.register_buffer("lam", torch.ones((), device=m.weight.device), persistent=False)
             if hadamard:
                 b = hadamard_block(m.in_features)
                 h = torch.ones(1, 1)

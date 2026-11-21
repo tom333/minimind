@@ -91,6 +91,9 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
         for opt in optimizers:
             for param_group in opt.param_groups:
                 param_group['lr'] = lr * param_group.get('lr_ratio', 1.0)
+        if args.ternary and args.ternary_start > 0:  # 16 bits jusqu'à ternary_start, puis rampe vers le ternaire
+            lam = min(max((global_step - args.ternary_start * total_steps) / max(args.ternary_ramp * total_steps, 1), 0.0), 1.0)
+            for m in ternary_layers: m.lam.fill_(lam)
 
         with autocast_ctx:
             res = model(input_ids, labels=labels)
@@ -186,6 +189,8 @@ if __name__ == "__main__":
     parser.add_argument("--ffn_glu", default=1, type=int, choices=[0, 1], help="1 = FFN à porte (SwiGLU, 3 matrices) ; 0 = down(act(up(x))), 2 matrices")
     parser.add_argument("--subln", default=0, type=int, choices=[0, 1], help="RMSNorm avant o_proj et down_proj (BitNet)")
     parser.add_argument("--ternary", default="", choices=["", "matrix", "row", "group"], help="Poids ternaires −1/0/+1 dans les blocs (échelle par matrice, par ligne ou par groupe de 128)")
+    parser.add_argument("--ternary_start", default=0.0, type=float, help="Fraction de l'entraînement faite en 16 bits avant de passer au ternaire (0 = ternaire dès le départ)")
+    parser.add_argument("--ternary_ramp", default=0.02, type=float, help="Durée (fraction des pas) de la rampe 16 bits → ternaire")
     parser.add_argument("--ternary_hadamard", default=0, type=int, choices=[0, 1], help="Rotation de Walsh-Hadamard de l'entrée des matrices ternaires")
     parser.add_argument("--tokenizer_path", default="../model", type=str, help="Dossier du tokenizer (le vocabulaire du modèle en découle)")
     parser.add_argument("--system_prompts", default="zh", choices=["zh", "fr_en"], help="SFT : liste des prompts système ajoutés au hasard (zh = liste d'origine)")
@@ -322,6 +327,10 @@ if __name__ == "__main__":
         start_epoch = ckp_data['epoch']
         start_step = ckp_data.get('step', 0)
     
+    from model.ternary import TernaryLinear
+    ternary_layers = [m for m in model.modules() if isinstance(m, TernaryLinear)]
+    if ternary_layers and args.ternary_start > 0:
+        for m in ternary_layers: m.lam.fill_(0.0)
     # ========== 7. 编译和分布式包装 ==========
     if args.use_compile == 1:
         model = torch.compile(model)
@@ -354,7 +363,11 @@ if __name__ == "__main__":
         # corpus avec un champ `lang` (français / anglais) : loss par langue ; sinon sources du corpus d'origine
         groups = raw_ds.select(sorted(val_idx))['lang'] if 'lang' in raw_ds.column_names else None
         metrics = detailed_eval(getattr(model, '_orig_mod', model), args.device, data=args.data_path, doc_groups=groups)
-        Logger(format_metrics(metrics))
+        if ternary_layers:  # part de zéros et poids bloqués au seuil d'arrondi (« zone morte », Tequila)
+            with torch.no_grad():
+                stats = [(m.trits()[0] == 0).float().mean().item() for m in ternary_layers]
+            metrics['ternary_zero_frac'] = sum(stats) / len(stats)
+        Logger(format_metrics(metrics) + (f"\nternaire : {metrics['ternary_zero_frac']:.1%} de zéros" if ternary_layers else ''))
         if mlflow: mlflow.log_metrics({f'final_{k}': v for k, v in metrics.items()})
     if mlflow: mlflow.end_run()
     
