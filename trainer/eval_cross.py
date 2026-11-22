@@ -49,6 +49,9 @@ def log_mlflow(experiment, name, path, scores):
     mlflow.set_tracking_uri(os.environ.get("MINIMIND_MLFLOW_URI", "https://mlflow.tgu.ovh"))
     mlflow.set_experiment(experiment)
     with mlflow.start_run(run_name=name):
+        from trainer.provenance import git_commit
+
+        mlflow.set_tag("git_commit", git_commit())
         mlflow.log_params({"modele": path, "seq": SEQ})
         for test, (loss, bpb) in scores.items():
             mlflow.log_metrics({f"loss_{test}": loss, f"bpb_{test}": bpb})

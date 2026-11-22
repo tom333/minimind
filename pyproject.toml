@@ -20,6 +20,8 @@ dependencies = [
     "dagster==1.13.30",
     "dagster-k8s==0.29.30",
     "dagster-postgres==0.29.30",
+    "psutil>=7.2.2",
+    "nvidia-ml-py>=13.615.71",
 ]
 
 [dependency-groups]
@@ -28,6 +30,7 @@ dev = [
     "scipy",
     "datasketch",
     "kaggle>=2.2.5",
+    "pytest>=9.2.0",
 ]  # lint, ajustements de courbes, analyse de doublons
 
 [tool.uv]

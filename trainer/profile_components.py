@@ -94,7 +94,7 @@ def measure(remove=None, optimizer=True):
     ms = (time.perf_counter() - t0) / STEPS * 1000
     mem = torch.cuda.max_memory_allocated() / 2**30
     n = sum(p.numel() for p in model.parameters()) / 1e6
-    del model, opts
+    model = opts = None  # libère la mémoire GPU avant la mesure suivante
     torch.cuda.empty_cache()
     return ms, mem, n
 

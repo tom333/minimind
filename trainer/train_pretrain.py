@@ -370,7 +370,11 @@ if __name__ == "__main__":
         mlflow.set_tracking_uri(args.mlflow_uri)
         mlflow.set_experiment(args.mlflow_experiment)
         resumed_run = ckp_data.get('mlflow_run_id') if ckp_data else None
+        try: mlflow.enable_system_metrics_logging()  # charge GPU/CPU et mémoire au fil du run
+        except Exception as e: Logger(f'métriques système indisponibles : {e}')
         mlflow.start_run(run_id=resumed_run) if resumed_run else mlflow.start_run(run_name=args.run_name)
+        from trainer.provenance import run_tags
+        mlflow.set_tags(run_tags(args.data_path, args.tokenizer_path, f'{args.data_path}.train_rand{args.val_docs}.npy'))
         if not resumed_run: mlflow.log_params({**vars(args), "params_M": round(sum(p.numel() for p in model.parameters()) / 1e6, 3), "total_steps": total_steps})
 
     # ========== 6. 从ckp恢复状态 ==========

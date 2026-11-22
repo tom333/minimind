@@ -1,0 +1,17 @@
+name: tests
+on:
+  push:
+    branches: [experiments]
+  pull_request:
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      # erreurs réelles seulement (syntaxe, noms indéfinis) : le code hérité du projet d'origine garde ses imports inutilisés
+      - run: uv run ruff check --select E9,F63,F7,F82 model trainer corpus orchestration tests
+      - run: uv run pytest -q tests

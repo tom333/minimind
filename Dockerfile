@@ -28,6 +28,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ libc6-d
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
+# commit du code embarqué : posé après l'installation des dépendances pour ne pas invalider cette couche
+ARG GIT_COMMIT=inconnu
+ENV MINIMIND_GIT_COMMIT=$GIT_COMMIT \
+    MINIMIND_IMAGE=localhost:32000/minimind-dagster:$GIT_COMMIT
 COPY model model
 COPY dataset/__init__.py dataset/lm_dataset.py dataset/
 COPY trainer trainer
