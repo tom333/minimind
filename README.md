@@ -6,7 +6,8 @@ en cours), menées avec le même protocole, bruit de mesure compris, résultats 
 
 Le code de départ est celui de [MiniMind](https://github.com/jingyaogong/minimind) (Apache 2.0), un projet
 pédagogique en PyTorch pur. Ce dépôt y ajoute la démarche expérimentale, la chaîne de données bilingue,
-des variantes d'architecture et l'outillage (Dagster, Optuna, MLflow).
+des variantes d'architecture et l'outillage : Dagster, Optuna et MLflow sur un cluster Kubernetes local,
+SkyPilot pour les GPU loués, Kaggle et Colab pour les GPU gratuits, tests et intégration continue.
 
 ## Résultats en bref
 
@@ -16,7 +17,10 @@ des variantes d'architecture et l'outillage (Dagster, Optuna, MLflow).
 | Les techniques publiées tiennent-elles à petite échelle ? | **Une sur six.** Muon tient ; noyaux Liger, calendrier WSD, plafonnement des logits, matrices structurées et couche mémoire n'apportent rien de mesurable. |
 | Que vaut le modèle bilingue ? | 1,02 milliard de tokens, 7 h 54 d'entraînement. En français, il prédit mieux que SmolLM2-360M, cinq fois plus gros (tableau ci-dessous). |
 | Peut-on en faire un assistant ? | Oui pour la forme : français fluide, format de conversation acquis. Non pour le fond : répétitions, pas de raisonnement à plusieurs étapes. |
-| Poids à trois valeurs (−1, 0, +1) ? | Modèle six fois plus petit pour 8 % de loss en plus ; travaux en cours pour agrandir le modèle à mémoire égale. |
+| Poids à trois valeurs (−1, 0, +1) ? | À taille égale : +0,10 de loss après réglage (taux d'apprentissage ×2). Agrandi à 104M paramètres, le ternaire comble la moitié de l'écart pour un modèle trois fois plus léger que le 16 bits. Les techniques de compression publiées (échelles par groupe, rotation de Hadamard) n'aident pas depuis zéro. |
+| Peut-on accélérer l'entraînement ? | Pas gratuitement sur cette carte : les réglages système ne rapportent rien, et à temps de calcul égal aucune variante ne bat le modèle d'origine. Le routage des tokens (Mixture-of-Depths) accélère de 33 % pour un peu de loss ; un défaut de compilation qui lui coûtait 15 minutes au démarrage a été trouvé et contourné. |
+| Et à 150M paramètres ? | Sur un budget court, le 150M fait déjà mieux que le 71M (−0,087 de loss) ; il demanderait 14 à 20 h par milliard de tokens sur la RTX 3060, d'où l'usage de GPU externes. |
+| Les GPU gratuits sont-ils utilisables ? | Oui en fp16 : même loss qu'en bf16 à 0,001 près. Une T4 va à 58 % de la RTX 3060 ; les deux T4 de Kaggle, en entraînement distribué, s'en approchent. |
 
 Toutes les mesures sont accompagnées de leur repère dans les [fiches d'études](docs/etudes/README.md).
 
@@ -47,7 +51,8 @@ Après ajustement sur 775 000 conversations (val_loss 4,4 → 1,30) :
 > **Paul a 5 pommes. Il en mange 2. Il en achète 4. Combien de pommes a-t-il maintenant ?**
 > Paul a maintenant 5 pommes. Il en mange 2, donc il lui en reste : 5 − 2 = 3 pommes. *(faux : 7)*
 
-C'est le niveau attendu à cette taille, et le point de départ des essais d'architecture en cours.
+C'est le niveau attendu à cette taille, et le point de départ des essais d'architecture en cours. Le modèle
+de 71M sert d'étalonnage : méthode, mesures et coûts, avant de passer à 150M paramètres.
 
 ## Le modèle
 
@@ -84,6 +89,22 @@ flowchart TB
 
 Les parts ne s'additionnent pas exactement : la compilation fusionne des opérations voisines. Le FFN
 concentre 63 % des paramètres et 59 % du temps, d'où les études qui portent sur lui.
+
+**Variantes disponibles**, chacune derrière une option de `train_pretrain.py` et mesurée dans une étude :
+
+```mermaid
+flowchart LR
+    subgraph BLOC["Un bloc"]
+        direction TB
+        R{{"Routeur (blocs impairs)<br/>--mod_capacity"}} -. "tokens retenus" .-> A["Attention"]
+        A --> F["FFN"]
+    end
+    F -.- V1["SwiGLU (défaut)<br/>ReLU² sans porte : --ffn_glu 0<br/>FFN partagé : --ffn_shared 1"]
+    A -.- V2["Poids ternaires −1/0/+1 : --ternary<br/>bascule progressive : --ternary_start<br/>SubLN, rotation Hadamard"]
+    BLOC -.- V3["Objectif : mot à mot (défaut)<br/>diffusion masquée : --objective mdm<br/>mixte : --objective both"]
+    classDef opt fill:#e3f2fd,stroke:#1565c0,color:#000
+    class V1,V2,V3 opt
+```
 
 **Recette d'entraînement** : Muon (0,01) pour les matrices des blocs, AdamW (7e-4) pour l'embedding et les
 normes, warmup 2 %, décroissance en cosinus, weight decay 0,1, lots de 64 séquences de 340 tokens
@@ -130,11 +151,19 @@ python study.py etudes/fr_en_full.yaml          # run complet, ~8 h sur une RTX 
 python -m corpus.sft_sources && python study.py etudes/sft_fr_en_full.yaml   # conversations, ~5 h
 
 python eval_cross.py moi=../out/etude_fr-en-full/fr-en-full-t0_768.pth smollm2=hf:HuggingFaceTB/SmolLM2-135M
+python eval_bench.py moi=registre:minimind-fr-en-base@reference --taches francais   # bancs standards
 python eval_reasoning.py ../out/etude_sft-fr-en-full/sft-fr-en-full-t0_768_best.pth \
        --tokenizer_path ../dataset/fr_en/tokenizer_fr65_16k --langs fr,en
+cd ..
+
+uv run pytest -q tests                          # 10 tests : un pas, reprise exacte, mode distribué, variantes…
+sky launch -c mm sky/entrainement.yaml --infra kubernetes     # même entraînement via SkyPilot
+scripts/kaggle.sh lancer train NOM "options"    # sur les GPU gratuits de Kaggle (reprise automatique)
+python scripts/enregistrer_modele.py --nom minimind-fr-en-base --poids … --run …   # registre de modèles
 ```
 
-Chaque run écrit ses courbes et ses paramètres dans MLflow (`MINIMIND_MLFLOW_URI`).
+Chaque run écrit dans MLflow (`MINIMIND_MLFLOW_URI`) ses courbes, ses paramètres, la charge du GPU et sa
+traçabilité : commit du code, image, empreinte des données et du tokenizer.
 
 ## Organisation du dépôt
 
@@ -143,21 +172,57 @@ Chaque run écrit ses courbes et ses paramètres dans MLflow (`MINIMIND_MLFLOW_U
 | `model/` | le modèle, découpé par composant (attention, FFN, normes, RoPE, poids ternaires, couche mémoire) et commenté |
 | `trainer/` | entraînement (`train_pretrain.py`), études Optuna (`study.py`, `etudes/*.yaml`), évaluations, profilage |
 | `corpus/` | construction des corpus et des jeux de test |
-| `orchestration/`, `deploy/`, `scripts/` | jobs Dagster sur Kubernetes, file d'attente du GPU, image Docker |
+| `orchestration/`, `deploy/` | jobs Dagster sur Kubernetes, file d'attente du GPU, image Docker |
+| `sky/`, `cloud/`, `scripts/` | tâche SkyPilot, script exécuté sur les GPU distants, lanceurs Kaggle et Colab, registre de modèles |
+| `tests/`, `.github/` | tests de fumée et intégration continue (GitHub Actions) |
 | `docs/etudes/` | les fiches d'études |
 
 ## Plateforme
 
-Les études tournent en jobs Dagster sur un cluster Kubernetes à une machine (microk8s), une à la fois sur
-le GPU ; Optuna décrit les campagnes, MLflow garde les mesures. Une classe de priorité libère le GPU
-lorsqu'un entraînement démarre. Détails : [fiche 15](docs/etudes/15-plateforme.md).
+```mermaid
+flowchart LR
+    DEV["Code<br/>(git, uv.lock)"] --> CI["GitHub Actions<br/>tests + lint"]
+    DEV --> IMG["Image Docker<br/>(commit embarqué)"]
+
+    subgraph LOCAL["Cluster Kubernetes local (microk8s)"]
+        DAG["Dagster<br/>file GPU, une tâche à la fois"] --> OPT["Optuna<br/>études YAML"]
+        OPT --> RUN["Entraînement<br/>RTX 3060"]
+        SKYK["SkyPilot<br/>(backend Kubernetes)"] --> RUN
+    end
+    IMG --> DAG
+
+    subgraph EXT["GPU externes"]
+        KAG["Kaggle<br/>2 × T4, distribué"]
+        COL["Colab<br/>T4 / A100 / H100"]
+        LOUE["GPU loué<br/>(SkyPilot : RunPod, Vast…)"]
+    end
+    DEV -. "clone + uv sync<br/>reprise après coupure" .-> EXT
+
+    RUN --> ML[("MLflow<br/>mesures, traçabilité,<br/>métriques GPU")]
+    EXT -. "si joignable" .-> ML
+    ML --> REG["Registre de modèles<br/>base / chat @reference"]
+    REG --> EVAL["Évaluations<br/>bits/octet, bancs standards,<br/>raisonnement"]
+    REG --> HF["Hugging Face<br/>(publication)"]
+
+    classDef ext fill:#fff3e0,stroke:#e65100,color:#000
+    class KAG,COL,LOUE ext
+```
+
+- **Local** : les études tournent en jobs Dagster, une à la fois sur le GPU ; une classe de priorité libère
+  le GPU quand un entraînement démarre. Détails : [fiche 15](docs/etudes/15-plateforme.md).
+- **Externe** : le même script s'exécute sur Kaggle, Colab ou un GPU loué. Il clone le dépôt, recrée
+  l'environnement exact (`uv.lock`), reprend au dernier point de sauvegarde, et s'arrête proprement avant la
+  fin d'une session. La reprise est vérifiée pas à pas, y compris en mode distribué.
+- **Robustesse** : une panne du serveur de suivi n'interrompt pas un entraînement (mesures perdues,
+  calcul poursuivi).
 
 ## État et suite
 
-- En cours : poids ternaires (recette et architecture adaptées, puis agrandissement à mémoire égale),
-  variantes du FFN.
-- À venir : publication des poids et de la fiche du modèle sur Hugging Face, essais d'architecture
-  orientés raisonnement, passage à ~150M paramètres.
+- En cours : run complet du 71M sur le corpus « web sélectionné », sur les deux T4 de Kaggle ; évaluation sur
+  les bancs standards.
+- À venir : passage à 150M paramètres (objectif : moins de 16 h par milliard de tokens, idéalement 8 h),
+  publication des poids et de la fiche du modèle sur Hugging Face, essais d'architecture orientés
+  raisonnement (blocs réutilisés en boucle), corpus avec du code.
 
 ## Crédits et licence
 
