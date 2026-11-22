@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pilotage de Kaggle (GPU gratuit) depuis ce PC. Prérequis : jeton d'API dans ~/.kaggle/kaggle.json (chmod 600).
+# Pilotage de Kaggle (GPU gratuit) depuis ce PC. Prérequis : jeton d'API dans ~/.kaggle/access_token (chmod 600).
 #   scripts/kaggle.sh donnees                     crée ou met à jour le jeu de données privé (tokens en cache + tokenizer, ~2 Go)
 #   scripts/kaggle.sh lancer diagnostic|bench     mesure la machine avec notre banc de débit
 #   scripts/kaggle.sh lancer train NOM "ARGS"     entraînement (ARGS = options de train_pretrain.py) ; relancer la
@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 KAGGLE="uv run --quiet kaggle"
-USER_K=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.kaggle/kaggle.json')))['username'])")
+USER_K=$($KAGGLE config view | sed -n 's/^- username: //p')
 DATASET="$USER_K/minimind-fr-en"; KERNEL="$USER_K/minimind-run"; BUILD=$PWD/out/kaggle_build   # sur le même disque que le corpus : liens physiques, pas de copie
 CORPUS=${MINIMIND_KAGGLE_CORPUS:-pretrain_fr65}
 
