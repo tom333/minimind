@@ -77,6 +77,8 @@ if CONFIG["mode"] in ("diagnostic", "bench"):
     only = "--only base,relu2,mod-25,150M" if CONFIG["mode"] == "diagnostic" else ""
     for dtype in CONFIG.get("dtypes", ["bfloat16", "float16"]):
         sh(f"{env} {python} bench_speed.py --dtype {dtype} {only} 2>&1 | grep -v Warning | tee {OUT}/bench_{dtype}.log", check=False)
+elif CONFIG["mode"] == "cmd":  # commande libre dans trainer/ avec l'environnement du dépôt (diagnostics)
+    sh(f"{env} {python} {' '.join(CONFIG['args'])} 2>&1 | grep -v Warning | tee {OUT}/{CONFIG['name']}.log", check=False)
 else:
     args = " ".join(CONFIG["args"])
     try:  # suivi dans MLflow seulement si le serveur est joignable depuis cette machine
