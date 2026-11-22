@@ -28,3 +28,20 @@ def test_variantes_tournent(corpus, tmp_path):
 def test_serveur_de_suivi_injoignable_ne_tue_pas_l_entrainement(corpus, tmp_path):
     out, losses, val = train(corpus, tmp_path / "m", "--save_resume", "0", "--use_mlflow", "--mlflow_uri", "http://127.0.0.1:9", steps=8)
     assert "MLflow indisponible" in out and losses and val is not None
+
+
+def test_mode_distribue_deux_processus(corpus, tmp_path):
+    """Deux processus sur processeur (gloo) : l'entraînement distribué va au bout et donne une loss finie."""
+    import subprocess
+    import sys
+
+    from conftest import ROOT
+
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES="", OMP_NUM_THREADS="1", HF_DATASETS_CACHE=str(tmp_path / "hf"), PYTHONPATH=ROOT)
+    cmd = [sys.executable, "-m", "torch.distributed.run", "--standalone", "--nproc_per_node", "2", "train_pretrain.py",
+           "--device", "cpu", "--dtype", "float32", "--data_path", corpus, "--tokenizer_path", "../model", "--packing", "1",
+           "--max_seq_len", "64", "--max_steps", "6", "--eval_interval", "6", "--val_docs", "20", "--batch_size", "2",
+           "--hidden_size", "64", "--num_hidden_layers", "2", "--use_compile", "0", "--optimizer", "muon",
+           "--num_workers", "0", "--save_resume", "0", "--save_dir", str(tmp_path / "d"), "--save_weight", "d"]
+    run = subprocess.run(cmd, cwd=os.path.join(ROOT, "trainer"), env=env, capture_output=True, text=True, timeout=600)
+    assert run.returncode == 0 and "step 6: val_loss" in run.stdout, run.stdout[-1500:] + run.stderr[-1500:]

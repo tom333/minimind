@@ -181,6 +181,10 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
 
         # durée de session bientôt atteinte (machine louée ou gratuite) : point de reprise, puis arrêt propre
         time_up = args.max_hours > 0 and time.time() - run_start > args.max_hours * 3600 and step % args.accumulation_steps == 0
+        if dist.is_initialized() and args.max_hours > 0:  # décision commune : celle de la carte la plus avancée
+            flag = torch.tensor(float(time_up), device=args.device)
+            dist.all_reduce(flag, op=dist.ReduceOp.MAX)
+            time_up = bool(flag.item())
         if (step % args.save_interval == 0 or last_step or time_up) and is_main_process():
             model.eval()
             moe_suffix = '_moe' if lm_config.use_moe else ''
@@ -275,7 +279,8 @@ if __name__ == "__main__":
 
     # ========== 1. 初始化环境和随机种子 ==========
     local_rank = init_distributed_mode()
-    if dist.is_initialized(): args.device = f"cuda:{local_rank}"
+    if dist.is_initialized() and torch.cuda.is_available(): args.device = f"cuda:{local_rank}"
+    world_size = dist.get_world_size() if dist.is_initialized() else 1
     setup_seed(args.seed + (dist.get_rank() if dist.is_initialized() else 0))
     
     # ========== 2. 配置目录、模型参数、检查ckp ==========
@@ -346,8 +351,8 @@ if __name__ == "__main__":
     elif args.val_docs > 0:
         val_ds = PackedPretrainDataset(None if cached else raw_ds.select(sorted(val_idx)), tokenizer, args.max_seq_len, cache_path=token_caches[1])
         val_loader = DataLoader(val_ds, batch_size=args.batch_size)
-    tokens_per_step = args.batch_size * args.max_seq_len
-    steps_per_epoch = (len(train_ds) + args.batch_size - 1) // args.batch_size
+    tokens_per_step = args.batch_size * args.max_seq_len * world_size  # mode distribué : un lot par carte et par pas
+    steps_per_epoch = (len(train_ds) + args.batch_size * world_size - 1) // (args.batch_size * world_size)
     total_steps = args.epochs * steps_per_epoch
     if args.max_tokens > 0: total_steps = min(total_steps, args.max_tokens // tokens_per_step)
     if args.max_steps > 0: total_steps = min(total_steps, args.max_steps)
@@ -414,7 +419,7 @@ if __name__ == "__main__":
         model = torch.compile(model)
         Logger('torch.compile enabled')
     if dist.is_initialized():
-        model = DistributedDataParallel(model, device_ids=[local_rank])
+        model = DistributedDataParallel(model, device_ids=[local_rank] if torch.cuda.is_available() else None)
     
     # ========== 8. 开始训练 ==========
     for epoch in range(start_epoch, args.epochs):

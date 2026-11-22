@@ -71,7 +71,10 @@ for path in glob.glob(f"{INPUT}/**/out/resume/*_resume.pth", recursive=True):
     print("point de reprise récupéré :", path, flush=True)
 
 # 6. le travail
-env = "CUDA_VISIBLE_DEVICES=0 MINIMIND_MLFLOW_URI=" + CONFIG.get("mlflow_uri", "")
+gpus = int(CONFIG.get("gpus", 1))
+env = ("" if gpus > 1 else "CUDA_VISIBLE_DEVICES=0 ") + "MINIMIND_MLFLOW_URI=" + CONFIG.get("mlflow_uri", "")
+# plusieurs GPU sur la machine : entraînement distribué (un lot par carte, gradients moyennés à chaque pas)
+launcher = f"{SRC}/.venv/bin/torchrun --standalone --nproc_per_node {gpus}" if gpus > 1 else f"{python} -u"
 os.chdir(f"{SRC}/trainer")
 if CONFIG["mode"] in ("diagnostic", "bench"):
     only = "--only base,relu2,mod-25,150M" if CONFIG["mode"] == "diagnostic" else ""
@@ -89,7 +92,7 @@ else:
     except Exception as e:
         print("MLflow injoignable, suivi dans le journal seulement :", type(e).__name__, flush=True)
     code = sh(
-        f"{env} {python} -u train_pretrain.py --data_path {data_path} --tokenizer_path {tokenizer_path} "
+        f"{env} {launcher} train_pretrain.py --data_path {data_path} --tokenizer_path {tokenizer_path} "
         f"--save_dir {OUT} --resume_dir {OUT}/resume --save_resume 1 --from_resume 1 "
         f"--max_hours {CONFIG.get('max_hours', 8)} --save_weight {CONFIG['name']} {args} 2>&1 | grep -v Warning | tee -a {OUT}/{CONFIG['name']}.log",
         check=False,
