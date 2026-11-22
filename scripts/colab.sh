@@ -30,6 +30,8 @@ case "${1:-}" in
     for f in $parts/train.part.*; do
       for essai in 1 2 3 4 5; do colab upload -s $S "$f" "/content/data/$(basename "$f")" >/dev/null 2>&1 && break; sleep 10; done
       echo "envoyé : $(basename "$f")"
+      # un envoi de fichier ne compte pas comme activité du noyau : sans cela la machine est reprise pour inactivité
+      n=$((${n:-0} + 1)); [ $((n % 4)) -eq 0 ] && py "print('actif', $n)" 60 >/dev/null 2>&1 || true
     done
     sum=$(sha256sum "$big" | cut -d' ' -f1)
     py "import subprocess; print(subprocess.run('cd /content/data && cat train.part.* > $CORPUS.jsonl.train_rand2000.npy && rm -f train.part.* chunk_test.bin && sha256sum $CORPUS.jsonl.train_rand2000.npy', shell=True, capture_output=True, text=True).stdout)" 600 | grep -q "$sum" && echo "tokens reconstitués, empreinte conforme" || echo "ERREUR : empreinte différente"
