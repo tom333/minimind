@@ -29,7 +29,7 @@ case "${1:-}" in
 import json, sys
 mode, name, args = sys.argv[1:4]
 config = {"mode": mode, "name": name, "args": args.split(), "ref": "experiments", "repo": "https://github.com/tom333/minimind",
-          "max_hours": 8, "mlflow_uri": "https://mlflow.tgu.ovh", "input": "/kaggle/input", "out": "/kaggle/working/out"}
+          "max_hours": float(__import__("os").environ.get("MINIMIND_KAGGLE_HOURS", "11")), "mlflow_uri": "https://mlflow.tgu.ovh", "input": "/kaggle/input", "out": "/kaggle/working/out"}
 src = open("cloud/run.py").read().replace("__CONFIG__", repr(config))
 open("$BUILD/kernel/run.py", "w").write(src)
 meta = {"id": "$KERNEL", "title": "$(basename $KERNEL)", "code_file": "run.py", "language": "python", "kernel_type": "script",
