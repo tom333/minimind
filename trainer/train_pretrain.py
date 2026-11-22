@@ -71,6 +71,16 @@ def val_langs(data_path, val_docs):
     return out
 
 
+def track(mlflow, method, *args, **kwargs):
+    """Écrit dans MLflow sans jamais interrompre l'entraînement : si le serveur de suivi est injoignable
+    (redémarrage, réseau), la mesure est perdue et signalée, le calcul continue. Le journal texte garde tout."""
+    if not mlflow: return
+    try:
+        getattr(mlflow, method)(*args, **kwargs)
+    except Exception as e:
+        Logger(f'MLflow indisponible ({method}) : {type(e).__name__} — mesure non enregistrée, entraînement poursuivi')
+
+
 def save_weights(path):
     raw_model = model.module if isinstance(model, DistributedDataParallel) else model
     raw_model = getattr(raw_model, '_orig_mod', raw_model)
@@ -156,14 +166,14 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             eta_min = spend_time / max(step - start_step, 1) * (iters - step) // 60
             Logger(f'Epoch:[{epoch + 1}/{args.epochs}]({step}/{iters}), loss: {current_loss:.4f}, logits_loss: {current_logits_loss:.4f}, aux_loss: {current_aux_loss:.4f}, lr: {current_lr:.8f}, epoch_time: {eta_min:.1f}min')
             if wandb: wandb.log({"loss": current_loss, "logits_loss": current_logits_loss, "aux_loss": current_aux_loss, "learning_rate": current_lr, "epoch_time": eta_min})
-            if mlflow: mlflow.log_metrics({"train_loss": current_loss, "learning_rate": current_lr, "tokens_seen": global_step * tokens_per_step, "tokens_per_sec": (step - start_step) * tokens_per_step / spend_time, "train_tokens_per_sec": (step - start_step) * tokens_per_step / max(spend_time - eval_seconds[0], 1e-9)}, step=global_step)
+            track(mlflow, 'log_metrics', {"train_loss": current_loss, "learning_rate": current_lr, "tokens_seen": global_step * tokens_per_step, "tokens_per_sec": (step - start_step) * tokens_per_step / spend_time, "train_tokens_per_sec": (step - start_step) * tokens_per_step / max(spend_time - eval_seconds[0], 1e-9)}, step=global_step)
 
         if val_loader is not None and (step % args.eval_interval == 0 or last_step):
             eval_start = time.time()
             val_loss = evaluate(val_loader)
             eval_seconds[0] += time.time() - eval_start  # exclu du débit d'entraînement
             Logger(f'step {global_step}: val_loss {val_loss:.4f}')
-            if mlflow: mlflow.log_metric("val_loss", val_loss, step=global_step)
+            track(mlflow, 'log_metric', "val_loss", val_loss, step=global_step)
             if args.save_best and val_loss < best['val_loss'] and is_main_process():
                 # garde le meilleur modèle vu en validation (protège du surapprentissage en fin de run)
                 best.update(val_loss=val_loss, step=global_step)
@@ -366,16 +376,23 @@ if __name__ == "__main__":
     
     mlflow = None
     if args.use_mlflow and is_main_process():
+        # délais courts : un serveur de suivi en panne ne doit ni tuer ni figer l'entraînement
+        os.environ.setdefault('MLFLOW_HTTP_REQUEST_MAX_RETRIES', '2')
+        os.environ.setdefault('MLFLOW_HTTP_REQUEST_TIMEOUT', '20')
         import mlflow
-        mlflow.set_tracking_uri(args.mlflow_uri)
-        mlflow.set_experiment(args.mlflow_experiment)
-        resumed_run = ckp_data.get('mlflow_run_id') if ckp_data else None
-        try: mlflow.enable_system_metrics_logging()  # charge GPU/CPU et mémoire au fil du run
-        except Exception as e: Logger(f'métriques système indisponibles : {e}')
-        mlflow.start_run(run_id=resumed_run) if resumed_run else mlflow.start_run(run_name=args.run_name)
-        from trainer.provenance import run_tags
-        mlflow.set_tags(run_tags(args.data_path, args.tokenizer_path, f'{args.data_path}.train_rand{args.val_docs}.npy'))
-        if not resumed_run: mlflow.log_params({**vars(args), "params_M": round(sum(p.numel() for p in model.parameters()) / 1e6, 3), "total_steps": total_steps})
+        try:
+            mlflow.set_tracking_uri(args.mlflow_uri)
+            mlflow.set_experiment(args.mlflow_experiment)
+            resumed_run = ckp_data.get('mlflow_run_id') if ckp_data else None
+            try: mlflow.enable_system_metrics_logging()  # charge GPU/CPU et mémoire au fil du run
+            except Exception as e: Logger(f'métriques système indisponibles : {e}')
+            mlflow.start_run(run_id=resumed_run) if resumed_run else mlflow.start_run(run_name=args.run_name)
+            from trainer.provenance import run_tags
+            mlflow.set_tags(run_tags(args.data_path, args.tokenizer_path, f'{args.data_path}.train_rand{args.val_docs}.npy'))
+            if not resumed_run: mlflow.log_params({**vars(args), "params_M": round(sum(p.numel() for p in model.parameters()) / 1e6, 3), "total_steps": total_steps})
+        except Exception as e:
+            Logger(f'MLflow indisponible au démarrage ({type(e).__name__}) : run non suivi, entraînement poursuivi')
+            mlflow = None
 
     # ========== 6. 从ckp恢复状态 ==========
     start_epoch, start_step = 0, 0
@@ -416,12 +433,12 @@ if __name__ == "__main__":
             done = train_epoch(epoch, loader, len(loader), 0, wandb)
         if done: break
     if stopped_early[0]:  # pas d'évaluation finale : le run n'est pas terminé
-        if mlflow: mlflow.end_run()
+        track(mlflow, 'end_run')
         sys.exit(0)
     if args.task == 'sft' and val_by_lang and is_main_process():
         lang_losses = {f'val_loss_{lang}': evaluate(loader) for lang, loader in val_by_lang.items()}
         Logger('loss par langue : ' + '  '.join(f'{k[9:]} {v:.4f}' for k, v in lang_losses.items()))
-        if mlflow: mlflow.log_metrics({f'final_{k}': v for k, v in lang_losses.items()})
+        track(mlflow, 'log_metrics', {f'final_{k}': v for k, v in lang_losses.items()})
     if args.detailed_eval and args.task == 'pretrain' and args.objective != 'mdm' and is_main_process():
         set_causal(model, True)
         from trainer.eval_detail import detailed_eval, format_metrics
@@ -433,9 +450,9 @@ if __name__ == "__main__":
                 stats = [(m.trits()[0] == 0).float().mean().item() for m in ternary_layers]
             metrics['ternary_zero_frac'] = sum(stats) / len(stats)
         Logger(format_metrics(metrics) + (f"\nternaire : {metrics['ternary_zero_frac']:.1%} de zéros" if ternary_layers else ''))
-        if mlflow: mlflow.log_metrics({f'final_{k}': v for k, v in metrics.items()})
-    if mlflow and torch.cuda.is_available(): mlflow.log_metric('final_gpu_mem_go', torch.cuda.max_memory_allocated() / 2**30)
-    if mlflow: mlflow.end_run()
+        track(mlflow, 'log_metrics', {f'final_{k}': v for k, v in metrics.items()})
+    if torch.cuda.is_available(): track(mlflow, 'log_metric', 'final_gpu_mem_go', torch.cuda.max_memory_allocated() / 2**30)
+    track(mlflow, 'end_run')
     
     # ========== 9. 清理分布进程 ==========
     if dist.is_initialized():

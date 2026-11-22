@@ -23,3 +23,8 @@ def test_variantes_tournent(corpus, tmp_path):
     for i, extra in enumerate((["--mod_capacity", "0.5"], ["--ternary", "row"], ["--objective", "mdm"], ["--ffn_glu", "0", "--hidden_act", "relu2"])):
         _, losses, val = train(corpus, tmp_path / f"v{i}", "--save_resume", "0", *extra, steps=8)
         assert losses and val is not None, extra
+
+
+def test_serveur_de_suivi_injoignable_ne_tue_pas_l_entrainement(corpus, tmp_path):
+    out, losses, val = train(corpus, tmp_path / "m", "--save_resume", "0", "--use_mlflow", "--mlflow_uri", "http://127.0.0.1:9", steps=8)
+    assert "MLflow indisponible" in out and losses and val is not None
