@@ -22,7 +22,17 @@ case "${1:-}" in
   donnees)
     py 'import os; os.makedirs("/content/data/tokenizer_fr65_16k", exist_ok=True)'
     for f in dataset/fr_en/tokenizer_fr65_16k/*; do colab upload -s $S "$f" "/content/data/tokenizer_fr65_16k/$(basename "$f")"; done
-    for f in val_rand2000.langs.json val_rand2000.npy train_rand2000.npy; do echo "envoi de $f…"; colab upload -s $S "dataset/fr_en/$CORPUS.jsonl.$f" "/content/data/$CORPUS.jsonl.$f"; done
+    for f in val_rand2000.langs.json val_rand2000.npy; do colab upload -s $S "dataset/fr_en/$CORPUS.jsonl.$f" "/content/data/$CORPUS.jsonl.$f"; done
+    # le gros fichier de tokens (~2 Go) : Colab refuse les envois de plus de ~50 Mo, donc morceaux de 48 Mo,
+    # réessayés en cas d'échec, puis reconstitution et contrôle de l'empreinte sur la machine
+    big="dataset/fr_en/$CORPUS.jsonl.train_rand2000.npy"; parts=out/kaggle_build/chunks
+    mkdir -p $parts && find $parts -type f -delete; split -b 48M -d -a 3 "$big" $parts/train.part.
+    for f in $parts/train.part.*; do
+      for essai in 1 2 3 4 5; do colab upload -s $S "$f" "/content/data/$(basename "$f")" >/dev/null 2>&1 && break; sleep 10; done
+      echo "envoyé : $(basename "$f")"
+    done
+    sum=$(sha256sum "$big" | cut -d' ' -f1)
+    py "import subprocess; print(subprocess.run('cd /content/data && cat train.part.* > $CORPUS.jsonl.train_rand2000.npy && rm -f train.part.* chunk_test.bin && sha256sum $CORPUS.jsonl.train_rand2000.npy', shell=True, capture_output=True, text=True).stdout)" 600 | grep -q "$sum" && echo "tokens reconstitués, empreinte conforme" || echo "ERREUR : empreinte différente"
     py 'import subprocess; print(subprocess.run("ls -la /content/data /content/data/tokenizer_fr65_16k", shell=True, capture_output=True, text=True).stdout)' ;;
   lancer)
     mode=$2; name=${3:-$mode}; args=${4:-}; tmp=$(mktemp --suffix=.py)
