@@ -41,6 +41,25 @@ est comparable entre modèles aux tokenizers différents.
 surtout en anglais, ce qui explique son retard en français. Wikipédia est un terrain favorable à notre
 modèle, qui en a beaucoup vu. En anglais, il est nettement derrière tous les autres.
 
+**Bancs standards** (lm-evaluation-harness, précision en %, plus haut = mieux ; `trainer/eval_bench.py`) :
+
+| Épreuve | Hasard | **Ce modèle, 71M** | SmolLM2 135M | SmolLM2 360M | CroissantLLM 1,3B |
+|---|---|---|---|---|---|
+| Grammaire française (french_bench) | 25 | **61,3** | 42,9 | 44,5 | 77,3 |
+| Vocabulaire français (french_bench) | 25 | **58,0** | 30,3 | 37,0 | 78,2 |
+| Implication entre phrases, FR (XNLI) | 33 | **39,6** | 35,3 | 37,1 | 48,8 |
+| Suite plausible, FR (HellaSwag) | 25 | 28,1 | 29,1 | 31,8 | 50,3 |
+| Questions de sciences, FR (ARC) | 25 | 23,8 | 23,6 | 26,7 | 30,5 |
+| Compréhension de texte, FR (Belebele) | 25 | 23,3 | 22,3 | 24,6 | 26,8 |
+| Suite plausible, EN (HellaSwag) | 25 | 27,7 | 43,2 | 56,3 | 53,7 |
+| Questions de sciences, EN (ARC facile) | 25 | 38,2 | 58,7 | 67,9 | 50,6 |
+| Bon sens physique, EN (PIQA) | 50 | 57,0 | 68,6 | 72,1 | 71,3 |
+| Questions de sciences, EN (SciQ) | 25 | 55,4 | 78,6 | 86,5 | 80,0 |
+
+En français, le modèle maîtrise la **langue** (grammaire, vocabulaire) mieux que SmolLM2-360M, cinq fois plus
+gros ; il reste au niveau du hasard sur le **raisonnement et les connaissances** (HellaSwag, ARC, Belebele),
+comme les SmolLM2. En anglais, il est nettement derrière : 35 % de son corpus seulement, et peu de tokens.
+
 ### Ce que le modèle sait faire, et ne sait pas faire
 
 Après ajustement sur 775 000 conversations (val_loss 4,4 → 1,30) :
