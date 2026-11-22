@@ -1,6 +1,9 @@
 # fichiers NON envoyés vers la machine par SkyPilot (workdir) : données, sorties, environnements
 .venv/
-dataset/
+# dataset/ contient aussi du code (lm_dataset.py) : on n'exclut que les données
+dataset/fr_en/
+dataset/*.jsonl
+dataset/*.json
 out/
 checkpoints/
 minimind-3/
