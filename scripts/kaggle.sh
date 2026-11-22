@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 KAGGLE="uv run --quiet kaggle"
 USER_K=$($KAGGLE config view | sed -n 's/^- username: //p')
-DATASET="$USER_K/minimind-fr-en"; KERNEL="$USER_K/minimind-run"; BUILD=$PWD/out/kaggle_build   # sur le même disque que le corpus : liens physiques, pas de copie
+DATASET="$USER_K/minimind-fr-en"; KERNEL="$USER_K/${MINIMIND_KAGGLE_KERNEL:-minimind-gpu}"; BUILD=$PWD/out/kaggle_build   # sur le même disque que le corpus : liens physiques, pas de copie
 CORPUS=${MINIMIND_KAGGLE_CORPUS:-pretrain_fr65}
 
 case "${1:-}" in
@@ -31,12 +31,12 @@ config = {"mode": mode, "name": name, "args": args.split(), "ref": "experiments"
           "max_hours": 8, "mlflow_uri": "https://mlflow.tgu.ovh", "input": "/kaggle/input", "out": "/kaggle/working/out"}
 src = open("cloud/run.py").read().replace("__CONFIG__", repr(config))
 open("$BUILD/kernel/run.py", "w").write(src)
-meta = {"id": "$KERNEL", "title": "minimind-run", "code_file": "run.py", "language": "python", "kernel_type": "script",
+meta = {"id": "$KERNEL", "title": "$(basename $KERNEL)", "code_file": "run.py", "language": "python", "kernel_type": "script",
         "is_private": True, "enable_gpu": True, "enable_internet": True,
         "dataset_sources": ["$DATASET"], "kernel_sources": ["$KERNEL"] if mode == "train" and "$EXISTE" == "oui" else [], "competition_sources": []}
 json.dump(meta, open("$BUILD/kernel/kernel-metadata.json", "w"), indent=1)
 PY
-    $KAGGLE kernels push -p "$BUILD/kernel" ;;
+    $KAGGLE kernels push -p "$BUILD/kernel" --accelerator "${MINIMIND_KAGGLE_GPU:-NvidiaTeslaT4}" ;;
   etat) $KAGGLE kernels status "$KERNEL" ;;
   sorties) mkdir -p out/kaggle && $KAGGLE kernels output "$KERNEL" -p out/kaggle && ls -la out/kaggle ;;
   *) sed -n 2,8p "$0" ;;
