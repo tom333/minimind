@@ -67,6 +67,7 @@ class MiniMindBlock(nn.Module):
         # « note > 0 » prédise ce choix : à l'évaluation, la décision ne dépend plus du futur.
         self.mod_capacity = getattr(config, "mod_capacity", 0.0) if layer_id % 2 == 1 else 0.0
         self.mod_aux_coef = getattr(config, "mod_aux_coef", 0.01)
+        self.mod_sort = getattr(config, "mod_sort", False)
         self.router = nn.Linear(config.hidden_size, 1, bias=False) if self.mod_capacity else None
         self.aux_loss = 0.0
 
@@ -77,13 +78,22 @@ class MiniMindBlock(nn.Module):
         score = self.router(hidden_states).squeeze(-1)  # [batch, seq]
         if self.training:
             k = max(1, int(hidden_states.size(1) * self.mod_capacity))
-            idx = score.topk(k, dim=1).indices.sort(dim=1).values  # tokens retenus, dans l'ordre du texte
+            top = score.topk(k, dim=1).indices
+            target = torch.zeros_like(score).scatter(1, top, 1.0)  # 1 pour les tokens retenus
+            if self.mod_sort:  # ancien chemin, gardé pour le diagnostic (trainer/diag_compile_mod.py)
+                idx = top.sort(dim=1).values
+            else:
+                # tokens retenus dans l'ordre du texte, SANS tri : un second topk sur « masque × rang inversé »
+                # rend les positions croissantes. torch.compile transforme un `sort` de petite taille en tri
+                # bitonique déroulé, dont la compilation peut prendre un quart d'heure selon la taille.
+                # en float32 : en demi-précision, les rangs au-delà de 256 ne sont plus tous distincts
+                rank = torch.arange(score.size(1), 0, -1, device=score.device, dtype=torch.float32)
+                idx = (target.float() * rank).topk(k, dim=1).indices
             gather_idx = idx.unsqueeze(-1).expand(-1, -1, hidden_states.size(-1))
             chosen = hidden_states.gather(1, gather_idx)
             cos, sin = position_embeddings
             out, _ = self.block(chosen, (cos[idx], sin[idx]))  # chaque token garde sa position d'origine
             delta = (out - chosen) * score.gather(1, idx).unsqueeze(-1)
-            target = torch.zeros_like(score).scatter(1, idx, 1.0)
             self.aux_loss = self.mod_aux_coef * F.binary_cross_entropy_with_logits(score.float(), target.float())
             return hidden_states.scatter_add(1, gather_idx, delta.to(hidden_states.dtype)), None
         keep = score > 0  # décision causale

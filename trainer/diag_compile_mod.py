@@ -17,9 +17,9 @@ ONE = r"""
 import sys, time, torch
 sys.path.insert(0, "..")
 from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
-k, dtype = int(sys.argv[1]), getattr(torch, sys.argv[2])
+k, dtype, use_sort = int(sys.argv[1]), getattr(torch, sys.argv[2]), sys.argv[3] == "1"
 cap = (k + 0.5) / 340 if k else 0.0
-model = MiniMindForCausalLM(MiniMindConfig(vocab_size=16000, mod_capacity=cap)).cuda()
+model = MiniMindForCausalLM(MiniMindConfig(vocab_size=16000, mod_capacity=cap, mod_sort=use_sort)).cuda()
 fn = torch.compile(model)
 x = torch.randint(0, 16000, (64, 340), device="cuda")
 times = []
@@ -31,17 +31,18 @@ for i in range(4):
     model.zero_grad(set_to_none=True)
     torch.cuda.synchronize(); times.append(time.perf_counter() - t)
 kept = [int(340 * l.mod_capacity) for l in model.model.layers if l.router is not None][:1]
-print(f"RESULT tokens={kept[0] if kept else 340} premier_pas={times[0]:.0f}s deuxieme={times[1]:.1f}s regime={times[-1]*1000:.0f}ms", flush=True)
+print(f"RESULT tri={int(use_sort)} tokens={kept[0] if kept else 340} premier_pas={times[0]:.0f}s deuxieme={times[1]:.1f}s regime={times[-1]*1000:.0f}ms", flush=True)
 """
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokens", default="0,42,84,85,86,170")
     parser.add_argument("--dtype", default="bfloat16")
+    parser.add_argument("--sort", default="1,0", help="1 = ancien chemin avec tri, 0 = chemin sans tri")
     args = parser.parse_args()
-    for k in args.tokens.split(","):
+    for k, use_sort in [(k, s) for s in args.sort.split(",") for k in args.tokens.split(",")]:
         env = dict(os.environ, TORCHINDUCTOR_CACHE_DIR=tempfile.mkdtemp(prefix="inductor_"))
         start = time.time()
-        r = subprocess.run([sys.executable, "-c", ONE, k, args.dtype], env=env, capture_output=True, text=True)
+        r = subprocess.run([sys.executable, "-c", ONE, k, args.dtype, use_sort], env=env, capture_output=True, text=True)
         line = [l for l in r.stdout.splitlines() if l.startswith("RESULT")]
-        print(line[0] if line else f"tokens={k} ÉCHEC : {r.stderr.strip().splitlines()[-1][:160]}", f"| total {time.time() - start:.0f}s", flush=True)
+        print(line[0] if line else f"tri={use_sort} tokens={k} ÉCHEC : {r.stderr.strip().splitlines()[-1][:160]}", f"| total {time.time() - start:.0f}s", flush=True)

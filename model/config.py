@@ -97,3 +97,4 @@ class MiniMindConfig(PretrainedConfig):
         # des tokens (choisis par un routeur) traverse le bloc ; les autres le contournent. 0 = désactivé.
         self.mod_capacity = kwargs.get("mod_capacity", 0.0)
         self.mod_aux_coef = kwargs.get("mod_aux_coef", 0.01)
+        self.mod_sort = kwargs.get("mod_sort", False)  # diagnostic : ordonner les tokens retenus par un tri
