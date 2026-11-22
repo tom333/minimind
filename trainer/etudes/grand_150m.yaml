@@ -1,0 +1,31 @@
+# Premier essai de la marche suivante : 148M paramètres (largeur 1024, 10 blocs), budget court (50M tokens).
+# But : temps par pas et mémoire RÉELS en entraînement, et une première loss. Le budget court (0,3 token par
+# paramètre) et le taux d'apprentissage réglé pour le 71M défavorisent ce modèle : la loss est indicative.
+# Repères : 71M de référence au même budget = 3.459 (27 min, 8,2 Go). Banc du 22/11 : dense lot de 64 = mémoire
+# insuffisante ; dense lot de 32 = 16 600 tokens/s ; Mixture-of-Depths 25 % = 26 600 tokens/s, 9,5 Go.
+name: grand-150m
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+  hidden_size: 1024
+  num_hidden_layers: 10
+space:
+  variante:
+    mod-25: {mod_capacity: 0.25}
+    dense-lot32: {batch_size: 32, accumulation_steps: 2}
