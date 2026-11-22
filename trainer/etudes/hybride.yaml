@@ -1,0 +1,32 @@
+# Architecture hybride (brouillon par diffusion, finalisation en mot à mot) : on adapte le modèle mot à mot
+# complet (1,02 Md tokens) aux DEUX objectifs, un pas sur deux, pendant 100M tokens. Deux taux d'apprentissage :
+# la recette d'origine, et un taux réduit (affinage d'un modèle déjà entraîné).
+# Mesures : val_loss mot à mot (doit rester proche de 2,967, celle du modèle de départ) et borne de diffusion
+# (journal) ; puis trainer/eval_hybride.py pour la génération hybride.
+name: hybride
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+from_subdir: etude_fr-en-full
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 100000000
+  objective: both
+  from_weight: fr-en-full-t0
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 0
+  eval_interval: 1000
+  log_interval: 50
+  seed: 42
+space:
+  variante:
+    lr-recette: {}
+    lr-reduit: {muon_lr: 0.003, learning_rate: 2e-4}
