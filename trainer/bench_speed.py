@@ -145,7 +145,7 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
             continue
         results[name] = (ms, mem, ktps)
-        base = results["base"][2]
+        base = results.get("base", results[name])[2]  # si la référence a échoué, pas de comparaison
         print(
             f"{name:28} {ms:8.0f} {ktps:11.1f} {ktps / base - 1:+8.1%} {mem:7.1f} Go",
             flush=True,
