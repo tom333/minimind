@@ -24,6 +24,12 @@ dependencies = [
     "nvidia-ml-py>=13.615.71",
 ]
 
+[project.optional-dependencies]
+eval = [
+    "accelerate>=1.16.0",
+    "lm-eval>=0.4",
+]
+
 [dependency-groups]
 dev = [
     "ruff",
