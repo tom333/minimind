@@ -9,15 +9,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 KAGGLE="uv run --quiet kaggle"
 USER_K=$($KAGGLE config view | sed -n 's/^- username: //p')
-DATASET="$USER_K/minimind-fr-en"; KERNEL="$USER_K/${MINIMIND_KAGGLE_KERNEL:-minimind-gpu}"; BUILD=$PWD/out/kaggle_build   # sur le même disque que le corpus : liens physiques, pas de copie
 CORPUS=${MINIMIND_KAGGLE_CORPUS:-pretrain_fr65}
+# un jeu de données Kaggle par corpus : le script distant prend le premier cache de tokens qu'il trouve
+DATASET="$USER_K/minimind-fr-en$([ "$CORPUS" = pretrain_fr65 ] || echo "-${CORPUS#pretrain_fr65}")"; KERNEL="$USER_K/${MINIMIND_KAGGLE_KERNEL:-minimind-gpu}"; BUILD=$PWD/out/kaggle_build   # sur le même disque que le corpus : liens physiques, pas de copie
 
 case "${1:-}" in
   donnees)
     mkdir -p "$BUILD/data" && find "$BUILD/data" -mindepth 1 -delete; mkdir -p "$BUILD/data/tokenizer_fr65_16k"
     for f in train_rand2000.npy val_rand2000.npy val_rand2000.langs.json; do ln -f "$PWD/dataset/fr_en/$CORPUS.jsonl.$f" "$BUILD/data/"; done
     cp -f dataset/fr_en/tokenizer_fr65_16k/* "$BUILD/data/tokenizer_fr65_16k/"
-    printf '{"title": "minimind-fr-en", "id": "%s", "licenses": [{"name": "other"}]}\n' "$DATASET" > "$BUILD/data/dataset-metadata.json"
+    printf '{"title": "%s", "id": "%s", "licenses": [{"name": "other"}]}\n' "${DATASET#*/}" "$DATASET" > "$BUILD/data/dataset-metadata.json"
     if $KAGGLE datasets status "$DATASET" >/dev/null 2>&1; then $KAGGLE datasets version -p "$BUILD/data" -m "mise à jour" --dir-mode zip
     else $KAGGLE datasets create -p "$BUILD/data" --dir-mode zip; fi ;;   # privé par défaut
   lancer)
