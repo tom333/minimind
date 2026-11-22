@@ -1,0 +1,39 @@
+# Tâche SkyPilot : un entraînement MiniMind, la même description pour notre cluster et pour un GPU loué.
+#   sky launch -c mm sky/entrainement.yaml --infra kubernetes                 (notre RTX 3060)
+#   sky jobs launch sky/entrainement.yaml --infra runpod --gpus A100:1         (GPU loué, relance auto si la machine est perdue)
+# Variables à surcharger avec --env : RUN, ARGS (options de train_pretrain.py), DATA (corpus), DTYPE.
+# Les données et les sorties sont dans /data/corpus et /data/out : volumes du cluster (cf. ~/.sky/config.yaml),
+# à remplacer par des file_mounts (stockage objet) sur un cloud.
+name: minimind
+
+resources:
+  accelerators: RTX3060:1
+  cpus: 4+
+  memory: 16+
+
+envs:
+  RUN: sky-essai
+  DATA: fr_en/pretrain_fr65.jsonl
+  TOKENIZER: fr_en/tokenizer_fr65_16k
+  DTYPE: bfloat16
+  ARGS: "--max_steps 60 --eval_interval 60 --log_interval 10"
+  MLFLOW_URI: https://mlflow.tgu.ovh
+
+workdir: .
+
+setup: |
+  set -e
+  command -v uv >/dev/null || pip install -q uv
+  uv sync --frozen --no-dev
+
+run: |
+  set -e
+  mkdir -p /data/out/$RUN
+  cd trainer
+  ../.venv/bin/python -u train_pretrain.py \
+    --data_path /data/corpus/$DATA --tokenizer_path /data/corpus/$TOKENIZER --dtype $DTYPE \
+    --save_dir /data/out/$RUN --resume_dir /data/out/$RUN --save_weight $RUN --save_resume 1 --from_resume 1 \
+    --optimizer muon --muon_lr 0.01 --learning_rate 7e-4 --warmup_ratio 0.02 --weight_decay 0.1 \
+    --batch_size 64 --accumulation_steps 1 --packing 1 --use_compile 1 \
+    --use_mlflow --mlflow_uri $MLFLOW_URI --mlflow_experiment minimind-sky --run_name $RUN \
+    $ARGS

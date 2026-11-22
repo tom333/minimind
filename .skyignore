@@ -1,0 +1,9 @@
+# fichiers NON envoyés vers la machine par SkyPilot (workdir) : données, sorties, environnements
+.venv/
+dataset/
+out/
+checkpoints/
+minimind-3/
+images/
+*.pth
+*.npy
