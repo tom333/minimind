@@ -1,10 +1,10 @@
 """
-Script exécuté SUR Kaggle (GPU gratuit). Il n'est pas lancé à la main : scripts/kaggle.sh y injecte la
-configuration (CONFIG) puis l'envoie avec l'API Kaggle.
+Script exécuté SUR la machine distante (Kaggle ou Colab). Il n'est pas lancé à la main : scripts/kaggle.sh
+ou scripts/colab.sh y injecte la configuration (CONFIG) puis l'envoie.
 
 Déroulé : diagnostic de la machine → clone du dépôt → environnement Python identique au nôtre (uv) →
-branchement des données (jeu Kaggle privé) → reprise d'un run interrompu si une sortie précédente est
-attachée → exécution du mode demandé. Tout ce qui doit survivre va dans /kaggle/working/out.
+branchement des données → reprise d'un run interrompu si un point de reprise existe → exécution du mode
+demandé. Tout ce qui doit survivre va dans CONFIG["out"] (sortie du notebook Kaggle, dossier Colab ou Drive).
 Modes : diagnostic (machine + banc de débit court), bench (banc complet), train (entraînement avec
 reprise et arrêt propre avant la limite de durée de la session).
 """
@@ -17,7 +17,7 @@ import sys
 
 CONFIG = __CONFIG__
 
-SRC, OUT = "/tmp/minimind", "/kaggle/working/out"  # code et environnement hors de la sortie sauvegardée
+SRC, OUT, INPUT = "/tmp/minimind", CONFIG["out"], CONFIG["input"]  # code et environnement hors de la sortie sauvegardée
 
 
 def sh(cmd, check=True):
@@ -32,11 +32,11 @@ def cuda_ok(python):
 
 # 1. la machine
 sh("nvidia-smi", check=False)
-sh("nproc; free -g | head -2; df -h /kaggle/working /tmp | cat", check=False)
+sh("nproc; free -g | head -2; df -h /tmp | cat", check=False)
 
 # 2. le code
 os.makedirs(OUT, exist_ok=True)
-sh(f"git clone --depth 1 -b {CONFIG['ref']} {CONFIG['repo']} {SRC}")
+sh(f"rm -rf {SRC}; git clone --depth 1 -b {CONFIG['ref']} {CONFIG['repo']} {SRC}")
 os.chdir(SRC)
 sh("git log --oneline -1")
 
@@ -53,19 +53,20 @@ if not cuda_ok(python):
     else:
         sys.exit("Aucune version de PyTorch avec GPU et optimiseur Muon n'a pu être installée : voir le journal.")
 
-# 4. les données : tokens en cache (.npy), étiquettes de langue et tokenizer du jeu Kaggle attaché
-caches = glob.glob("/kaggle/input/**/*.train_rand2000.npy", recursive=True)
-tokenizers = glob.glob("/kaggle/input/**/tokenizer.json", recursive=True)
-if not caches or not tokenizers:
-    sh("find /kaggle/input -maxdepth 4 | head -50", check=False)
-    sys.exit("Données introuvables dans /kaggle/input : le jeu de données est-il attaché ?")
-data_path = caches[0][: -len(".train_rand2000.npy")]
-tokenizer_path = os.path.dirname(tokenizers[0])
-print("données :", data_path, "| tokenizer :", tokenizer_path, flush=True)
+# 4. les données (entraînement seulement) : tokens en cache (.npy), étiquettes de langue et tokenizer
+if CONFIG["mode"] == "train":
+    caches = glob.glob(f"{INPUT}/**/*.train_rand2000.npy", recursive=True)
+    tokenizers = glob.glob(f"{INPUT}/**/tokenizer.json", recursive=True)
+    if not caches or not tokenizers:
+        sh(f"find {INPUT} -maxdepth 4 | head -50", check=False)
+        sys.exit(f"Données introuvables dans {INPUT} : ont-elles été envoyées ?")
+    data_path = caches[0][: -len(".train_rand2000.npy")]
+    tokenizer_path = os.path.dirname(tokenizers[0])
+    print("données :", data_path, "| tokenizer :", tokenizer_path, flush=True)
 
-# 5. reprise : point de sauvegarde d'une session précédente (sortie du même notebook attachée en entrée)
+# 5. reprise : point de sauvegarde d'une session précédente (Kaggle : sortie du notebook attachée en entrée)
 os.makedirs(f"{OUT}/resume", exist_ok=True)
-for path in glob.glob("/kaggle/input/**/out/resume/*_resume.pth", recursive=True):
+for path in glob.glob(f"{INPUT}/**/out/resume/*_resume.pth", recursive=True):
     shutil.copy(path, f"{OUT}/resume/")
     print("point de reprise récupéré :", path, flush=True)
 
