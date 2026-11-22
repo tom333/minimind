@@ -56,6 +56,21 @@ def collate_sft(batch):
     return input_ids[:, :keep], labels[:, :keep]
 
 
+def val_langs(data_path, val_docs):
+    """Langue de chaque document de validation (même tirage que le split), ou None si le corpus n'a pas de
+    champ `lang`. Mise en cache à côté du corpus : le fichier JSONL n'est relu qu'une fois."""
+    cache = f'{data_path}.val_rand{val_docs}.langs.json'
+    if os.path.exists(cache):
+        with open(cache) as f: return json.load(f)
+    with open(data_path, encoding='utf-8') as f: langs = [json.loads(line).get('lang') for line in f]
+    idx = sorted(random.Random(0).sample(range(len(langs)), val_docs))
+    out = [langs[i] for i in idx] if langs[0] is not None else None
+    try:
+        with open(cache, 'w') as f: json.dump(out, f)
+    except OSError: pass  # dossier en lecture seule (jeu de données monté)
+    return out
+
+
 def save_weights(path):
     raw_model = model.module if isinstance(model, DistributedDataParallel) else model
     raw_model = getattr(raw_model, '_orig_mod', raw_model)
@@ -83,6 +98,7 @@ def evaluate(val_loader):
 
 
 eval_seconds = [0.0]  # temps passé en évaluation depuis le début de l'epoch
+run_start, stopped_early = time.time(), [False]  # pour --max_hours
 
 
 def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
@@ -153,7 +169,9 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
                 best.update(val_loss=val_loss, step=global_step)
                 save_weights(f"{args.save_dir}/{args.save_weight}_{lm_config.hidden_size}_best.pth")
 
-        if (step % args.save_interval == 0 or last_step) and is_main_process():
+        # durée de session bientôt atteinte (machine louée ou gratuite) : point de reprise, puis arrêt propre
+        time_up = args.max_hours > 0 and time.time() - run_start > args.max_hours * 3600 and step % args.accumulation_steps == 0
+        if (step % args.save_interval == 0 or last_step or time_up) and is_main_process():
             model.eval()
             moe_suffix = '_moe' if lm_config.use_moe else ''
             ckp = f'{args.save_dir}/{args.save_weight}_{lm_config.hidden_size}{moe_suffix}.pth'
@@ -161,11 +179,15 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             raw_model = getattr(raw_model, '_orig_mod', raw_model)
             state_dict = raw_model.state_dict()
             torch.save({k: v.half().cpu() for k, v in state_dict.items()}, ckp)
-            if args.save_resume: lm_checkpoint(lm_config, weight=args.save_weight, model=model, optimizer=optimizer, scaler=scaler, epoch=epoch, step=step, wandb=wandb, save_dir='../checkpoints')
+            if args.save_resume: lm_checkpoint(lm_config, weight=args.save_weight, model=model, optimizer=optimizer, scaler=scaler, epoch=epoch, step=step, wandb=wandb, save_dir=resume_dir, optimizers=[o.state_dict() for o in optimizers], best=dict(best), mlflow_run_id=mlflow.active_run().info.run_id if mlflow else None)
             model.train()
             del state_dict
 
         del input_ids, labels, res, loss
+        if time_up and not last_step:
+            Logger(f'arrêt programmé au pas {global_step} après {args.max_hours} h : relancer avec --from_resume 1')
+            stopped_early[0] = True
+            return True
         if global_step >= total_steps: return True
     return False
 
@@ -200,6 +222,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_attention_heads", default=None, type=int, help="Nb de têtes Q (défaut config)")
     parser.add_argument("--num_key_value_heads", default=None, type=int, help="Nb de têtes K/V, GQA (défaut config)")
     parser.add_argument("--intermediate_size", default=None, type=int, help="Largeur interne du FFN (défaut config)")
+    parser.add_argument("--max_hours", default=0.0, type=float, help="Arrêt propre après ce nombre d'heures, avec point de reprise (0 = sans limite)")
+    parser.add_argument("--resume_dir", default="", type=str, help="Dossier du checkpoint de reprise (défaut : ../checkpoints) ; à placer sur un stockage qui survit à la coupure")
     parser.add_argument("--save_resume", default=1, type=int, choices=[0, 1], help="Écrire le checkpoint de reprise (modèle+optimiseur, ~750Mo) dans ../checkpoints")
     parser.add_argument("--lr_schedule", default="cosine", choices=["cosine", "wsd"], help="cosine (d'origine) ou wsd : warmup, plateau, décroissance linéaire finale")
     parser.add_argument("--decay_ratio", default=0.2, type=float, help="WSD : part finale des steps en décroissance linéaire")
@@ -254,7 +278,10 @@ if __name__ == "__main__":
     if args.ffn_btt_rank: arch_overrides.update(ffn_btt_rank=args.ffn_btt_rank, ffn_btt_mid=tuple(int(v) for v in args.ffn_btt_mid.split(',')))
     arch_overrides['vocab_size'] = len(AutoTokenizer.from_pretrained(args.tokenizer_path))
     lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=bool(args.use_moe), **arch_overrides)
-    ckp_data = lm_checkpoint(lm_config, weight=args.save_weight, save_dir='../checkpoints') if args.from_resume==1 else None
+    resume_dir = args.resume_dir or '../checkpoints'
+    # un point de reprise au milieu d'un cumul de gradient perdrait les gradients déjà accumulés
+    assert not args.save_resume or args.save_interval % args.accumulation_steps == 0, "--save_interval doit être un multiple de --accumulation_steps pour une reprise exacte"
+    ckp_data = lm_checkpoint(lm_config, weight=args.save_weight, save_dir=resume_dir) if args.from_resume==1 else None
     
     # ========== 3. 设置混合精度 ==========
     device_type = "cuda" if "cuda" in args.device else "cpu"
@@ -273,21 +300,24 @@ if __name__ == "__main__":
     # ========== 5. 定义模型、数据、优化器 ==========
     model, tokenizer = init_model(lm_config, args.from_weight, tokenizer_path=args.tokenizer_path, save_dir=args.from_dir, device=args.device)
     pad_id, best, sft_lengths = tokenizer.pad_token_id, {'val_loss': float('inf'), 'step': 0}, None
-    raw_ds = load_dataset('json', data_files=args.data_path, split='train') if args.task == 'pretrain' else None
+    # tokens déjà en cache (.npy) : inutile de relire et de convertir tout le corpus (plusieurs Go, plusieurs minutes)
+    token_caches = [f'{args.data_path}.{part}_rand{args.val_docs}.npy' for part in ('train', 'val')]
+    cached = args.task == 'pretrain' and args.packing and all(os.path.exists(c) for c in token_caches)
+    raw_ds = load_dataset('json', data_files=args.data_path, split='train') if args.task == 'pretrain' and not cached else None
     if args.task == 'sft':
         from dataset.lm_dataset import SYSTEM_PROMPTS_FR_EN
         train_ds = SFTDataset(args.data_path, tokenizer, max_length=args.max_seq_len, system_prompts=SYSTEM_PROMPTS_FR_EN if args.system_prompts == 'fr_en' else None)
         raw_ds = train_ds.samples
     # split train/val ALÉATOIRE (seed fixe) : le fichier est trié par source (ex. QCM anglais à la fin)
-    val_idx = set(random.Random(0).sample(range(len(raw_ds)), args.val_docs))
-    train_idx = [i for i in range(len(raw_ds)) if i not in val_idx]
+    val_idx = set() if cached else set(random.Random(0).sample(range(len(raw_ds)), args.val_docs))
+    train_idx = [] if cached else [i for i in range(len(raw_ds)) if i not in val_idx]
     if args.task == 'sft':
         sft_lengths = sft_char_lengths(raw_ds, f'{args.data_path}.charlen.npy')[train_idx]
         val_ds = copy.copy(train_ds)
         val_ds.samples = raw_ds.select(sorted(val_idx))
         train_ds.samples = raw_ds.select(train_idx)
     elif args.packing:
-        train_ds = PackedPretrainDataset(raw_ds.select(train_idx), tokenizer, args.max_seq_len, cache_path=f'{args.data_path}.train_rand{args.val_docs}.npy')
+        train_ds = PackedPretrainDataset(None if cached else raw_ds.select(train_idx), tokenizer, args.max_seq_len, cache_path=token_caches[0])
     else:
         train_ds = PretrainDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
         train_ds.samples = train_ds.samples.select(train_idx)
@@ -304,7 +334,7 @@ if __name__ == "__main__":
                 ds.samples = raw_ds.select([i for i in sorted(val_idx) if langs[i] == lang])
                 val_by_lang[lang] = DataLoader(ds, batch_size=args.batch_size, collate_fn=collate_sft)
     elif args.val_docs > 0:
-        val_ds = PackedPretrainDataset(raw_ds.select(sorted(val_idx)), tokenizer, args.max_seq_len, cache_path=f'{args.data_path}.val_rand{args.val_docs}.npy')
+        val_ds = PackedPretrainDataset(None if cached else raw_ds.select(sorted(val_idx)), tokenizer, args.max_seq_len, cache_path=token_caches[1])
         val_loader = DataLoader(val_ds, batch_size=args.batch_size)
     tokens_per_step = args.batch_size * args.max_seq_len
     steps_per_epoch = (len(train_ds) + args.batch_size - 1) // args.batch_size
@@ -328,7 +358,6 @@ if __name__ == "__main__":
     optimizer = optim.AdamW([{'params': decay, 'weight_decay': args.weight_decay}, {'params': no_decay, 'weight_decay': 0.0}] + ([{'params': mem_params, 'weight_decay': 0.0, 'lr_ratio': args.memory_lr_ratio}] if mem_params else []), lr=args.learning_rate)
     optimizers = [optimizer]
     if args.optimizer == 'muon':
-        assert not args.save_resume, "--save_resume non supporté avec Muon (un seul état d'optimiseur sauvegardé)"
         optimizers.append(torch.optim.Muon([{'params': muon_params, 'lr_ratio': args.muon_lr / args.learning_rate}], lr=args.muon_lr, weight_decay=args.weight_decay))
         if core_params:
             from trainer.muon import MuonAdamW
@@ -340,14 +369,17 @@ if __name__ == "__main__":
         import mlflow
         mlflow.set_tracking_uri(args.mlflow_uri)
         mlflow.set_experiment(args.mlflow_experiment)
-        mlflow.start_run(run_name=args.run_name)
-        mlflow.log_params({**vars(args), "params_M": round(sum(p.numel() for p in model.parameters()) / 1e6, 3), "total_steps": total_steps})
+        resumed_run = ckp_data.get('mlflow_run_id') if ckp_data else None
+        mlflow.start_run(run_id=resumed_run) if resumed_run else mlflow.start_run(run_name=args.run_name)
+        if not resumed_run: mlflow.log_params({**vars(args), "params_M": round(sum(p.numel() for p in model.parameters()) / 1e6, 3), "total_steps": total_steps})
 
     # ========== 6. 从ckp恢复状态 ==========
     start_epoch, start_step = 0, 0
     if ckp_data:
         model.load_state_dict(ckp_data['model'])
-        optimizer.load_state_dict(ckp_data['optimizer'])
+        # un état par optimiseur (AdamW, Muon, …) ; anciens checkpoints : AdamW seul
+        for opt, state in zip(optimizers, ckp_data.get('optimizers', [ckp_data['optimizer']])): opt.load_state_dict(state)
+        best.update(ckp_data.get('best', {}))
         scaler.load_state_dict(ckp_data['scaler'])
         start_epoch = ckp_data['epoch']
         start_step = ckp_data.get('step', 0)
@@ -379,6 +411,9 @@ if __name__ == "__main__":
         else:
             done = train_epoch(epoch, loader, len(loader), 0, wandb)
         if done: break
+    if stopped_early[0]:  # pas d'évaluation finale : le run n'est pas terminé
+        if mlflow: mlflow.end_run()
+        sys.exit(0)
     if args.task == 'sft' and val_by_lang and is_main_process():
         lang_losses = {f'val_loss_{lang}': evaluate(loader) for lang, loader in val_by_lang.items()}
         Logger('loss par langue : ' + '  '.join(f'{k[9:]} {v:.4f}' for k, v in lang_losses.items()))
@@ -387,7 +422,7 @@ if __name__ == "__main__":
         set_causal(model, True)
         from trainer.eval_detail import detailed_eval, format_metrics
         # corpus avec un champ `lang` (français / anglais) : loss par langue ; sinon sources du corpus d'origine
-        groups = raw_ds.select(sorted(val_idx))['lang'] if 'lang' in raw_ds.column_names else None
+        groups = val_langs(args.data_path, args.val_docs)
         metrics = detailed_eval(getattr(model, '_orig_mod', model), args.device, data=args.data_path, doc_groups=groups)
         if ternary_layers:  # part de zéros et poids bloqués au seuil d'arrondi (« zone morte », Tequila)
             with torch.no_grad():

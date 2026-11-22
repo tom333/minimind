@@ -21,6 +21,7 @@ import torch
 from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
 
 VOCAB, BATCH, SEQ, STEPS, WARMUP = 16000, 64, 340, 30, 10
+DTYPE = torch.bfloat16
 
 # nom → réglages. Clés : tf32, fused, clip, ns_steps, compile_mode, arch (surcharges du modèle), batch, seq
 VARIANTS = {
@@ -100,7 +101,7 @@ def measure(
         if i == WARMUP:
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast("cuda", dtype=DTYPE):
             out = fn(x, labels=x)
             loss = out.loss + out.aux_loss
         loss.backward()
@@ -125,7 +126,9 @@ if __name__ == "__main__":
         help="noms de variantes séparés par des virgules (préfixes acceptés)",
     )
     parser.add_argument("--mlflow_experiment", default="")
+    parser.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16"], help="float16 pour les cartes sans bf16 natif (T4)")
     args = parser.parse_args()
+    DTYPE = getattr(torch, args.dtype)
     wanted = [w for w in args.only.split(",") if w]
     results = {}
     print(

@@ -23,7 +23,12 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff", "scipy", "datasketch"]  # lint, ajustements de courbes, analyse de doublons
+dev = [
+    "ruff",
+    "scipy",
+    "datasketch",
+    "kaggle>=2.2.5",
+]  # lint, ajustements de courbes, analyse de doublons
 
 [tool.uv]
 package = false  # dépôt de scripts, pas un paquet installable
