@@ -85,6 +85,53 @@ def mdm_generate(model, prompt, length, steps=32, temperature=0.0, block=0, refi
     return x, history
 
 
+@torch.no_grad()
+def hybrid_generate(model, prompt, length, steps=16, block=8, accept=0.1, temperature=0.0):
+    """Architecture hybride : la DIFFUSION écrit un brouillon complet, le MOT À MOT le finalise.
+
+    1. brouillon : démasquage progressif (attention bidirectionnelle), toute la suite d'un coup ;
+    2. relecture : en mode mot à mot (attention causale), une seule passe donne, pour chaque position, la
+       probabilité du mot du brouillon sachant ce qui précède. Le premier mot jugé improbable (< `accept`)
+       est remplacé par le choix du mot à mot, et tout ce qui suit est re-brouillonné par la diffusion.
+    C'est le décodage spéculatif avec la diffusion comme « brouillonneur » : le texte final suit les choix du
+    mot à mot, et la part de mots acceptés mesure le travail fait par la diffusion (passes économisées).
+    Demande un modèle entraîné aux deux objectifs (--objective both).
+    """
+    p = prompt.size(1)
+    x = prompt
+    passes, accepted, history = 0, 0, []
+    while x.size(1) < p + length:
+        todo = min(block, p + length - x.size(1))
+        set_causal(model, False)
+        draft, _ = mdm_generate(model, x, todo, steps=max(1, steps * todo // block), temperature=temperature)
+        passes += max(1, steps * todo // block)
+        set_causal(model, True)
+        logits = model(draft).logits[0, x.size(1) - 1 : -1].float()
+        passes += 1
+        probs = logits.softmax(-1)
+        proposed = draft[0, x.size(1):]
+        ok = probs.gather(-1, proposed[:, None])[:, 0] >= accept
+        n_ok = int(ok.long().cumprod(0).sum())  # mots acceptés avant le premier refus
+        accepted += n_ok
+        fixed = proposed[:n_ok]
+        if n_ok < todo:  # premier mot refusé : remplacé par le choix du mot à mot
+            fixed = torch.cat([fixed, probs[n_ok].argmax()[None]])
+        history.append((draft.clone(), n_ok, todo))
+        x = torch.cat([x, fixed[None]], 1)
+    set_causal(model, True)
+    return x, history, accepted / length, passes
+
+
+@torch.no_grad()
+def ar_generate(model, prompt, length):
+    """Référence : mot à mot glouton, une passe par mot."""
+    set_causal(model, True)
+    x = prompt
+    for _ in range(length):
+        x = torch.cat([x, model(x).logits[0, -1].argmax()[None, None]], 1)
+    return x
+
+
 if __name__ == "__main__":
     import argparse
     import os
@@ -105,6 +152,8 @@ if __name__ == "__main__":
     parser.add_argument("--block", type=int, default=0, help="taille des blocs (0 = toute la réponse d'un coup)")
     parser.add_argument("--refine", type=int, default=0, help="tours de raffinage après le brouillon")
     parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--hybride", action="store_true", help="brouillon par diffusion, relecture et finalisation en mot à mot")
+    parser.add_argument("--accept", type=float, default=0.1, help="hybride : probabilité minimale pour accepter un mot du brouillon")
     args = parser.parse_args()
     tok = AutoTokenizer.from_pretrained(args.tokenizer_path)
     model = MiniMindForCausalLM(MiniMindConfig(vocab_size=len(tok)))
@@ -113,6 +162,15 @@ if __name__ == "__main__":
     set_causal(model, False)
     prompt = torch.tensor([[tok.bos_token_id] + tok(args.prompt, add_special_tokens=False).input_ids], device=args.device)
     torch.manual_seed(0)
+    if args.hybride:
+        clean = lambda t: tok.decode(t[0, 1:]).replace("<|buffer1|>", "▒").replace("\n", " ⏎ ")
+        out, hist, rate, passes = hybrid_generate(model, prompt, args.length, args.steps, args.block or 8, args.accept, args.temperature)
+        for draft, n_ok, todo in hist[:3]:
+            print(f"brouillon diffusion : {clean(draft)}  →  {n_ok}/{todo} mots acceptés")
+        print(f"\nHYBRIDE  : {clean(out)}")
+        print(f"MOT À MOT : {clean(ar_generate(model, prompt, args.length))}")
+        print(f"\nmots écrits par la diffusion et acceptés : {rate:.0%} ; passes du modèle : {passes} (mot à mot seul : {args.length})")
+        raise SystemExit
     out, history = mdm_generate(model, prompt, args.length, args.steps, args.temperature, args.block, args.refine)
     drafts = [i for i, (kind, _) in enumerate(history) if kind == "brouillon"]
     shown = sorted({drafts[0], drafts[len(drafts) // 3], drafts[2 * len(drafts) // 3], drafts[-1]} | set(range(drafts[-1] + 1, len(history))))
