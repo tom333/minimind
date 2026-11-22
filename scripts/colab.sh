@@ -9,12 +9,17 @@
 #   scripts/colab.sh etat                          fin du journal, GPU, processus (sert aussi à garder la session active)
 #   scripts/colab.sh garder                        `etat` toutes les 5 minutes jusqu'à la fin du travail
 #   scripts/colab.sh sorties                       rapatrie journaux, bancs et poids dans out/colab/
+#   scripts/colab.sh drive                         monte Google Drive (données déposées dans MyDrive/minimind/data)
 #   scripts/colab.sh stop                          libère la machine
+# Avec MINIMIND_COLAB_DRIVE=1, `lancer` lit les données sur Drive et y écrit les sorties (reprise après perte de la machine).
 # Sorties sur la machine : /content/out, ou Google Drive si MINIMIND_COLAB_OUT=/content/drive/MyDrive/minimind/out
 # (après `colab drivemount -s minimind`), ce qui fait survivre le point de reprise à la perte de la machine.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-S=minimind; OUT=${MINIMIND_COLAB_OUT:-/content/out}; CORPUS=${MINIMIND_KAGGLE_CORPUS:-pretrain_fr65}
+S=minimind; DRIVE=/content/drive/MyDrive/minimind
+OUT=${MINIMIND_COLAB_OUT:-/content/out}; INPUT=${MINIMIND_COLAB_INPUT:-/content/data}
+[ "${MINIMIND_COLAB_DRIVE:-0}" = 1 ] && { OUT=$DRIVE/out; INPUT=$DRIVE/data; }  # données lues et sorties écrites sur Drive
+ CORPUS=${MINIMIND_KAGGLE_CORPUS:-pretrain_fr65}
 py() { colab exec -s $S --timeout "${2:-120}" <<<"$1"; }   # exécute du Python dans le noyau distant
 
 case "${1:-}" in
@@ -38,11 +43,11 @@ case "${1:-}" in
     py 'import subprocess; print(subprocess.run("ls -la /content/data /content/data/tokenizer_fr65_16k", shell=True, capture_output=True, text=True).stdout)' ;;
   lancer)
     mode=$2; name=${3:-$mode}; args=${4:-}; tmp=$(mktemp --suffix=.py)
-    python3 - "$mode" "$name" "$args" "$OUT" > "$tmp" <<'PY'
+    python3 - "$mode" "$name" "$args" "$OUT" "$INPUT" > "$tmp" <<'PY'
 import sys
-mode, name, args, out = sys.argv[1:5]
+mode, name, args, out, inp = sys.argv[1:6]
 config = {"mode": mode, "name": name, "args": args.split(), "ref": "experiments", "repo": "https://github.com/tom333/minimind",
-          "max_hours": 10, "mlflow_uri": "https://mlflow.tgu.ovh", "input": "/content/data", "out": out}
+          "max_hours": 10, "mlflow_uri": "https://mlflow.tgu.ovh", "input": inp, "out": out}
 print(open("cloud/run.py").read().replace("__CONFIG__", repr(config)))
 PY
     colab upload -s $S "$tmp" /content/run.py; rm -f "$tmp"
@@ -53,6 +58,9 @@ PY
   sorties)
     mkdir -p out/colab
     for f in $(py "import glob, os; print(' '.join(p for p in glob.glob('$OUT/*') if os.path.isfile(p)))" | tail -1); do colab download -s $S "$f" "out/colab/$(basename "$f")" && echo "reçu : $(basename "$f")"; done ;;
+  drive)   # monte Google Drive (consentement à donner une fois dans le navigateur) et vérifie les données
+    colab drivemount -s $S /content/drive
+    py "import subprocess; print(subprocess.run('ls -la $DRIVE/data $DRIVE/data/tokenizer_fr65_16k; sha256sum $DRIVE/data/*.train_rand2000.npy | cut -c1-16', shell=True, capture_output=True, text=True).stdout)" 900 ;;
   stop) colab stop -s $S ;;
   *) sed -n 2,15p "$0" ;;
 esac
