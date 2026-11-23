@@ -1,8 +1,8 @@
 # MiniMind FR/EN — entraîner et étudier un petit modèle de langue sur une seule carte graphique
 
 Un modèle de langue bilingue français / anglais de **71 millions de paramètres**, entraîné depuis zéro sur
-une RTX 3060 (12 Go), et surtout le **journal d'expériences** qui l'accompagne : quinze études rédigées (d'autres
-en cours), menées avec le même protocole, bruit de mesure compris, résultats négatifs compris.
+une RTX 3060 (12 Go), et surtout le **journal d'expériences** qui l'accompagne : vingt-deux études rédigées,
+menées avec le même protocole, bruit de mesure compris, résultats négatifs compris.
 
 Le code de départ est celui de [MiniMind](https://github.com/jingyaogong/minimind) (Apache 2.0), un projet
 pédagogique en PyTorch pur. Ce dépôt y ajoute la démarche expérimentale, la chaîne de données bilingue,
@@ -141,7 +141,8 @@ assemblées bout à bout (*packing*), précision mixte bf16, `torch.compile`.
 
 Les fiches : [docs/etudes](docs/etudes/README.md) — débit, validation et bruit, réglages, taille de batch,
 Muon, loi d'échelle, architecture, matrices structurées, couche mémoire, compression, poids ternaires,
-ajustement en conversation, évaluation et raisonnement, corpus, plateforme.
+ajustement en conversation, évaluation et raisonnement, corpus, plateforme, ternaire (suite), accélération,
+routage des tokens, modèle de 150M, GPU externes, diffusion et hybride, industrialisation.
 
 ## Les données
 
