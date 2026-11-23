@@ -1,6 +1,6 @@
 # Études
 
-Journal des expériences menées sur ce dépôt, du 16 au 20 novembre 2026. Chaque fiche répond à une
+Journal des expériences menées sur ce dépôt, du 16 au 23 novembre 2026. Chaque fiche répond à une
 question, avec son protocole, ses mesures, sa conclusion et ses limites. Les résultats négatifs y figurent
 au même titre que les autres.
 
@@ -32,6 +32,13 @@ au même titre que les autres.
 | [13](13-evaluation-et-raisonnement.md) | Au-delà de la moyenne | tokens rares deux fois plus durs ; 10 % de réussite sur deux opérations enchaînées | constat |
 | [14](14-corpus.md) | Les données | corpus bilingue de 1,02 milliard de tokens, traçable et diffusable | construction |
 | [15](15-plateforme.md) | La plateforme | Dagster, Optuna et MLflow, avec partage automatique du GPU | construction |
+| [16](16-poids-ternaires-suite.md) | Ternaire : recette et agrandissement | seul le taux d'apprentissage compte (×2) ; 104M ternaire comble la moitié de l'écart à 3× moins de mémoire | gain partiel |
+| [17](17-acceleration.md) | Accélérer l'entraînement | aucun gain gratuit ; à temps égal, rien ne bat le modèle d'origine | négatif |
+| [18](18-mixture-of-depths.md) | Router les tokens | +33 % de débit pour un peu de loss ; défaut de compilation de 15 min trouvé et contourné | gain sous condition |
+| [19](19-modele-150m.md) | Vers 150M | −0,087 de loss dès 50M tokens ; 14 à 20 h par milliard sur la RTX 3060 | constat |
+| [20](20-gpu-externes.md) | GPU externes | fp16 sur T4 sans perte ; Kaggle, Colab, distribué, SkyPilot | construction |
+| [21](21-diffusion-et-hybride.md) | Diffusion et hybride | mécanisme fonctionnel ; ni plus rapide ni meilleur à cette taille | négatif à cette échelle |
+| [22](22-industrialisation.md) | Industrialisation | traçabilité, tests, registre, bancs standards | construction |
 
 ## Le chemin parcouru, à budget égal (50M tokens)
 
