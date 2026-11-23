@@ -449,7 +449,7 @@ if __name__ == "__main__":
         from trainer.eval_detail import detailed_eval, format_metrics
         # corpus avec un champ `lang` (français / anglais) : loss par langue ; sinon sources du corpus d'origine
         groups = val_langs(args.data_path, args.val_docs)
-        metrics = detailed_eval(getattr(model, '_orig_mod', model), args.device, data=args.data_path, doc_groups=groups)
+        metrics = detailed_eval(getattr(model.module if isinstance(model, DistributedDataParallel) else model, '_orig_mod', model.module if isinstance(model, DistributedDataParallel) else model), args.device, data=args.data_path, doc_groups=groups)
         if ternary_layers:  # part de zéros et poids bloqués au seuil d'arrondi (« zone morte », Tequila)
             with torch.no_grad():
                 stats = [(m.trits()[0] == 0).float().mean().item() for m in ternary_layers]
