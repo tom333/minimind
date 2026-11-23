@@ -18,7 +18,7 @@ from contextlib import nullcontext
 from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, DistributedSampler
-from model.model_minimind import MiniMindConfig
+from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
 from datasets import load_dataset
 from transformers import AutoTokenizer
 from dataset.lm_dataset import PretrainDataset, PackedPretrainDataset, SFTDataset
@@ -144,6 +144,14 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             else:
                 res = model(input_ids, labels=labels)
                 loss = res.loss + res.aux_loss
+                if teacher is not None:  # distillation : imiter les probabilités de l'enseignant sur ses k meilleurs tokens
+                    with torch.no_grad():
+                        t_logits = teacher(input_ids).logits[:, :-1].float() / args.distill_temp
+                        t_val, t_idx = t_logits.topk(args.distill_topk, dim=-1)
+                        t_prob = t_val.softmax(-1)
+                    s_logp = (res.logits[:, :-1].float() / args.distill_temp).log_softmax(-1).gather(-1, t_idx)
+                    kl = (t_prob * (t_prob.clamp_min(1e-9).log() - s_logp)).sum(-1).mean() * args.distill_temp ** 2
+                    loss = args.distill_alpha * kl + (1 - args.distill_alpha) * res.loss + res.aux_loss
             loss = loss / args.accumulation_steps
 
         scaler.scale(loss).backward()
@@ -251,6 +259,13 @@ if __name__ == "__main__":
     parser.add_argument("--ffn_shared", default=0, type=int, choices=[0, 1], help="Un seul FFN partagé par tous les blocs")
     parser.add_argument("--subln", default=0, type=int, choices=[0, 1], help="RMSNorm avant o_proj et down_proj (BitNet)")
     parser.add_argument("--ternary", default="", choices=["", "matrix", "row", "group"], help="Poids ternaires −1/0/+1 dans les blocs (échelle par matrice, par ligne ou par groupe de 128)")
+    parser.add_argument("--train_subset_tokens", default=0, type=int, help="Ne garder que ~N tokens d'entraînement, tirés au hasard (étude de la répétition, avec --epochs)")
+    parser.add_argument("--teacher", default="", type=str, help="Poids d'un modèle ENSEIGNANT (même tokenizer) : distillation de ses probabilités")
+    parser.add_argument("--teacher_hidden_size", default=768, type=int)
+    parser.add_argument("--teacher_layers", default=8, type=int)
+    parser.add_argument("--distill_alpha", default=0.9, type=float, help="Part de la distillation dans la loss (le reste : cross-entropy sur les vrais tokens)")
+    parser.add_argument("--distill_temp", default=1.0, type=float, help="Température de la distillation")
+    parser.add_argument("--distill_topk", default=50, type=int, help="Probabilités de l'enseignant limitées à ses k meilleurs tokens (Peng et al. 2024)")
     parser.add_argument("--objective", default="ar", choices=["ar", "mdm", "both"], help="ar = mot à mot ; mdm = diffusion masquée (attention bidirectionnelle) ; both = alternance")
     parser.add_argument("--ternary_start", default=0.0, type=float, help="Fraction de l'entraînement faite en 16 bits avant de passer au ternaire (0 = ternaire dès le départ)")
     parser.add_argument("--ternary_ramp", default=0.02, type=float, help="Durée (fraction des pas) de la rampe 16 bits → ternaire")
@@ -351,6 +366,9 @@ if __name__ == "__main__":
     elif args.val_docs > 0:
         val_ds = PackedPretrainDataset(None if cached else raw_ds.select(sorted(val_idx)), tokenizer, args.max_seq_len, cache_path=token_caches[1])
         val_loader = DataLoader(val_ds, batch_size=args.batch_size)
+    if args.train_subset_tokens:
+        train_ds.restrict(args.train_subset_tokens)
+        Logger(f'répétition : {len(train_ds)} séquences gardées (~{len(train_ds) * args.max_seq_len / 1e6:.0f}M tokens)')
     tokens_per_step = args.batch_size * args.max_seq_len * world_size  # mode distribué : un lot par carte et par pas
     steps_per_epoch = (len(train_ds) + args.batch_size * world_size - 1) // (args.batch_size * world_size)
     total_steps = args.epochs * steps_per_epoch
@@ -410,6 +428,13 @@ if __name__ == "__main__":
         start_epoch = ckp_data['epoch']
         start_step = ckp_data.get('step', 0)
     
+    teacher = None
+    if args.teacher:  # enseignant figé, même tokenizer ; ses probabilités sont recalculées à chaque pas
+        teacher = MiniMindForCausalLM(MiniMindConfig(hidden_size=args.teacher_hidden_size, num_hidden_layers=args.teacher_layers, vocab_size=lm_config.vocab_size))
+        teacher.load_state_dict({k: v.float() for k, v in torch.load(args.teacher, map_location='cpu').items()})
+        teacher = teacher.to(args.device).eval().requires_grad_(False)
+        if args.use_compile == 1: teacher = torch.compile(teacher)
+        Logger(f'distillation : enseignant {args.teacher}, alpha {args.distill_alpha}, température {args.distill_temp}, top-{args.distill_topk}')
     from model.ternary import TernaryLinear
     ternary_layers = [m for m in model.modules() if isinstance(m, TernaryLinear)]
     if ternary_layers and args.ternary_start > 0:

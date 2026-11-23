@@ -92,9 +92,19 @@ class PackedPretrainDataset(Dataset):
         if cache_path: np.save(cache_path, self.tokens)
 
     def __len__(self):
-        return len(self.tokens) // self.max_length
+        return len(self.index) if getattr(self, "index", None) is not None else len(self.tokens) // self.max_length
+
+    def restrict(self, n_tokens, seed=0):
+        """Ne garde qu'un sous-ensemble aléatoire (graine fixe) de séquences totalisant ~n_tokens : sert à
+        mesurer l'effet de la RÉPÉTITION (plusieurs époques sur moins de données). Tirage aléatoire, car le
+        fichier est rangé par source (français puis anglais)."""
+        total = len(self.tokens) // self.max_length
+        g = torch.Generator().manual_seed(seed)
+        self.index = torch.randperm(total, generator=g)[: n_tokens // self.max_length].sort().values.numpy()
 
     def __getitem__(self, index):
+        if getattr(self, "index", None) is not None:
+            index = int(self.index[index])
         block = self.tokens[index * self.max_length:(index + 1) * self.max_length]
         input_ids = torch.from_numpy(block.astype(np.int64))
         return input_ids, input_ids.clone()

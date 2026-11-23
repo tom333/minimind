@@ -1,0 +1,28 @@
+# Répétition des données (Muennighoff et al. 2023) : 50M tokens d'entraînement dans tous les cas, mais tirés d'un
+# sous-ensemble aléatoire du corpus « web sélectionné » relu plusieurs fois. Même validation pour tous.
+# Repère, 50M tokens tous neufs, même recette et même graine : 3,383 (étude fr-en-hq-court).
+name: repetition
+sampler: grid
+data_file: fr_en/pretrain_fr65hq.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+  epochs: 4
+space:
+  variante:
+    deux-passes: {train_subset_tokens: 25000000}
+    trois-passes: {train_subset_tokens: 16700000}

@@ -1,0 +1,29 @@
+# Distillation (étalonnage) : un 71M neuf apprend sur 50M tokens en imitant notre 71M complet (1,02 Md tokens,
+# val_loss 2,967), recette de Peng et al. 2024 : top-50 des probabilités de l'enseignant, 90 % KL + 10 % CE.
+# Deux températures (1 chez Busbridge et al. 2025, 0,5 chez Peng). La val_loss est la cross-entropy sur les vrais
+# tokens. Repères sans enseignant, même recette et même budget : 3,462 (graine 42) et 3,456 (graine 43).
+name: distillation
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+  teacher: /data/out/etude_fr-en-full/fr-en-full-t0_768.pth
+space:
+  variante:
+    temperature-1: {distill_temp: 1.0}
+    temperature-05: {distill_temp: 0.5}
