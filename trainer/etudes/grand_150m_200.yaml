@@ -1,0 +1,28 @@
+# 150M (largeur 1024, 10 blocs) sur un budget intermédiaire de 200M tokens : l'écart avec le 71M se creuse-t-il ?
+# Repères au même budget : 71M = 3.120 (96 min). À 50M tokens : 150M dense = 3.375 contre 3.462 pour le 71M.
+# Dense en lot de 32 cumulé deux fois (seul moyen de tenir en mémoire), même lot global que la recette.
+name: grand-150m-200
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 200000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 1000
+  log_interval: 200
+  seed: 42
+  hidden_size: 1024
+  num_hidden_layers: 10
+space:
+  variante:
+    dense-lot32: {batch_size: 32, accumulation_steps: 2}
