@@ -7,6 +7,7 @@ Deux mesures par jeu, plus bas = mieux :
 Un modèle extérieur se désigne par  nom=hf:dépôt  (ex. smollm2=hf:HuggingFaceTB/SmolLM2-135M) : il est lu
 avec son propre tokenizer. Les blocs font SEQ tokens de CHAQUE tokenizer, donc un peu plus ou moins de
 texte selon le modèle ; les bits par octet restent comparables.
+Un modèle hérité (trainer/heritage.py) se désigne par  nom=poids.pth@fiche.json  (forme et tokenizer dans la fiche).
 Usage : cd trainer && python eval_cross.py nom1=chemin1.pth nom2=hf:dépôt --tokenizer_path ...
 """
 import argparse
@@ -20,7 +21,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import torch
 import torch.nn.functional as F
 
-TEST_DIR = os.path.join(os.environ.get("MINIMIND_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "dataset")), "fr_en", "test")
+DATA_DIR = os.environ.get("MINIMIND_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "dataset"))
+TEST_DIR = os.path.join(DATA_DIR, "fr_en", "test")
 SEQ = 340
 
 
@@ -78,8 +80,11 @@ if __name__ == "__main__":
             model_tok = AutoTokenizer.from_pretrained(path[3:])
             model = AutoModelForCausalLM.from_pretrained(path[3:], dtype=torch.bfloat16)
         else:
-            model_tok = tok
-            model = MiniMindForCausalLM(MiniMindConfig(vocab_size=len(tok)))
+            # modèle hérité : poids.pth@fiche.json, la fiche (trainer/heritage.py) donne sa forme et son tokenizer
+            path, _, fiche = path.partition("@")
+            meta = json.load(open(fiche)) if fiche else {}
+            model_tok = AutoTokenizer.from_pretrained(os.path.join(DATA_DIR, meta["tokenizer"])) if fiche else tok
+            model = MiniMindForCausalLM(MiniMindConfig(vocab_size=len(model_tok), **meta.get("config", {})))
             model.load_state_dict({k: v.float() for k, v in torch.load(path, map_location="cpu").items()})
         print(f"{name} : {sum(p.numel() for p in model.parameters()) / 1e6:.0f}M paramètres", flush=True)
         model = model.to(args.device).eval()

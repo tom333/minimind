@@ -244,6 +244,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_attention_heads", default=None, type=int, help="Nb de têtes Q (défaut config)")
     parser.add_argument("--num_key_value_heads", default=None, type=int, help="Nb de têtes K/V, GQA (défaut config)")
     parser.add_argument("--intermediate_size", default=None, type=int, help="Largeur interne du FFN (défaut config)")
+    parser.add_argument("--head_dim", default=None, type=int, help="Largeur d'une tête d'attention (défaut : hidden_size / nb de têtes ; 128 pour un modèle hérité de Qwen3)")
     parser.add_argument("--max_hours", default=0.0, type=float, help="Arrêt propre après ce nombre d'heures, avec point de reprise (0 = sans limite)")
     parser.add_argument("--resume_dir", default="", type=str, help="Dossier du checkpoint de reprise (défaut : ../checkpoints) ; à placer sur un stockage qui survit à la coupure")
     parser.add_argument("--save_resume", default=1, type=int, choices=[0, 1], help="Écrire le checkpoint de reprise (modèle+optimiseur, ~750Mo) dans ../checkpoints")
@@ -303,7 +304,7 @@ if __name__ == "__main__":
     
     # ========== 2. 配置目录、模型参数、检查ckp ==========
     os.makedirs(args.save_dir, exist_ok=True)
-    arch_overrides = {k: getattr(args, k) for k in ('num_attention_heads', 'num_key_value_heads', 'intermediate_size') if getattr(args, k) is not None}
+    arch_overrides = {k: getattr(args, k) for k in ('num_attention_heads', 'num_key_value_heads', 'intermediate_size', 'head_dim') if getattr(args, k) is not None}
     if args.logit_softcap: arch_overrides['logit_softcap'] = args.logit_softcap
     if args.ternary: arch_overrides.update(ternary=args.ternary, ternary_hadamard=bool(args.ternary_hadamard))
     arch_overrides.update(hidden_act=args.hidden_act, ffn_glu=bool(args.ffn_glu), subln=bool(args.subln), ffn_shared=bool(args.ffn_shared), mod_capacity=args.mod_capacity)

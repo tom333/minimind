@@ -127,7 +127,9 @@ def init_model(lm_config, from_weight='pretrain', tokenizer_path='../model', sav
         moe_suffix = '_moe' if lm_config.use_moe else ''
         weight_path = f'{save_dir}/{from_weight}_{lm_config.hidden_size}{moe_suffix}.pth'
         weights = torch.load(weight_path, map_location=device)
-        model.load_state_dict(weights, strict=False)
+        missing, unexpected = model.load_state_dict(weights, strict=False)
+        if missing or unexpected:  # strict=False tolère des écarts : les signaler, un poids oublié repart du hasard
+            Logger(f'Poids de départ {weight_path} : {len(missing)} manquants, {len(unexpected)} inattendus ({(missing + unexpected)[:4]})')
 
     get_model_params(model, lm_config)
     Logger(f'Trainable Params: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f}M')
