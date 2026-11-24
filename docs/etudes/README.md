@@ -1,6 +1,6 @@
 # Études
 
-Journal des expériences menées sur ce dépôt, du 16 au 23 novembre 2026. Chaque fiche répond à une
+Journal des expériences menées sur ce dépôt, du 16 au 24 novembre 2026. Chaque fiche répond à une
 question, avec son protocole, ses mesures, sa conclusion et ses limites. Les résultats négatifs y figurent
 au même titre que les autres.
 
@@ -39,6 +39,10 @@ au même titre que les autres.
 | [20](20-gpu-externes.md) | GPU externes | fp16 sur T4 sans perte ; Kaggle, Colab, distribué, SkyPilot | construction |
 | [21](21-diffusion-et-hybride.md) | Diffusion et hybride | mécanisme fonctionnel ; ni plus rapide ni meilleur à cette taille | négatif à cette échelle |
 | [22](22-industrialisation.md) | Industrialisation | traçabilité, tests, registre, bancs standards | construction |
+| [23](23-distillation-repetition-generation.md) | Distillation, répétition, génération | distillation −0,095 à tokens égaux, nulle à temps égal ; 3 relectures +0,093 ; pénalité de répétition 1,2 adoptée | gain sous condition |
+| [24](24-tables-de-ngrammes.md) | Tables de n-grammes à l'entrée | −0,018 pour un coût nul ; l'avance fond pendant l'entraînement | gain faible |
+| [25](25-heritage.md) | Hériter des poids d'un modèle existant | un 150M taillé dans Qwen3-0.6B dépasse notre 71M de 8 h en 2 h | gain majeur |
+| [26](26-comptage.md) | Que remplace le comptage ? | le comptage vaut 9 minutes d'entraînement, mais ajoute −0,045 bit/octet au modèle de 8 h | gain |
 
 ## Le chemin parcouru, à budget égal (50M tokens)
 

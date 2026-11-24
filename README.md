@@ -21,6 +21,8 @@ SkyPilot pour les GPU loués, Kaggle et Colab pour les GPU gratuits, tests et in
 | Peut-on accélérer l'entraînement ? | Pas gratuitement sur cette carte : les réglages système ne rapportent rien, et à temps de calcul égal aucune variante ne bat le modèle d'origine. Le routage des tokens (Mixture-of-Depths) accélère de 33 % pour un peu de loss ; un défaut de compilation qui lui coûtait 15 minutes au démarrage a été trouvé et contourné. |
 | Et à 150M paramètres ? | Sur un budget court, le 150M fait déjà mieux que le 71M (−0,087 de loss) ; il demanderait 14 à 20 h par milliard de tokens sur la RTX 3060, d'où l'usage de GPU externes. |
 | Les GPU gratuits sont-ils utilisables ? | Oui en fp16 : même loss qu'en bf16 à 0,001 près. Une T4 va à 58 % de la RTX 3060 ; les deux T4 de Kaggle, en entraînement distribué, s'en approchent. |
+| Faut-il partir de zéro ? | Non, si un modèle de même architecture existe : un 150M taillé dans Qwen3-0.6B (vocabulaire réduit, 8 blocs sur 28) dépasse notre 71M de 8 h après 2 h d'entraînement, soit environ 4 fois moins de temps à qualité égale. |
+| Que vaut un simple comptage du corpus ? | Seul, le niveau de 9 minutes d'entraînement. En complément d'un modèle, −0,045 bit/octet pour quelques minutes de processeur : plus qu'un doublement du modèle. |
 
 Toutes les mesures sont accompagnées de leur repère dans les [fiches d'études](docs/etudes/README.md).
 
@@ -142,7 +144,8 @@ assemblées bout à bout (*packing*), précision mixte bf16, `torch.compile`.
 Les fiches : [docs/etudes](docs/etudes/README.md) — débit, validation et bruit, réglages, taille de batch,
 Muon, loi d'échelle, architecture, matrices structurées, couche mémoire, compression, poids ternaires,
 ajustement en conversation, évaluation et raisonnement, corpus, plateforme, ternaire (suite), accélération,
-routage des tokens, modèle de 150M, GPU externes, diffusion et hybride, industrialisation.
+routage des tokens, modèle de 150M, GPU externes, diffusion et hybride, industrialisation, distillation et
+répétition, tables de n-grammes, héritage, comptage.
 
 ## Les données
 
