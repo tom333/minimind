@@ -133,17 +133,19 @@ def loss_on(model, blocks, device):
     return nll / blocks[:, 1:].numel()
 
 
-def cmd_tailler(args):
+def load_parent(parent, tokenizer_dir, device):
+    """Le parent entier dans notre classe de modèle, avec le vocabulaire réduit. Retourne (modèle, tokenizer,
+    forme, ids d'origine des tokens gardés)."""
     from huggingface_hub import snapshot_download
     from safetensors.torch import load_file
     from transformers import AutoTokenizer
 
     from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
 
-    tok = AutoTokenizer.from_pretrained(args.tokenizer)
-    meta = json.load(open(os.path.join(args.tokenizer, "heritage.json")))
-    assert meta["parent"] == args.parent, "ce tokenizer a été réduit pour un autre parent"
-    folder = snapshot_download(args.parent, allow_patterns=["*.safetensors", "config.json"])
+    tok = AutoTokenizer.from_pretrained(tokenizer_dir)
+    meta = json.load(open(os.path.join(tokenizer_dir, "heritage.json")))
+    assert meta["parent"] == parent, "ce tokenizer a été réduit pour un autre parent"
+    folder = snapshot_download(parent, allow_patterns=["*.safetensors", "config.json"])
     cfg = json.load(open(os.path.join(folder, "config.json")))
     state = {}
     for f in sorted(glob.glob(os.path.join(folder, "*.safetensors"))):
@@ -156,7 +158,31 @@ def cmd_tailler(args):
     model = MiniMindForCausalLM(MiniMindConfig(vocab_size=len(tok), **shape))
     missing, unexpected = model.load_state_dict({k: v.float() for k, v in state.items()}, strict=False)
     assert not missing and not unexpected, f"poids non appariés : {missing} {unexpected}"
-    model = model.to(args.device).eval()
+    return model.to(device).eval(), tok, shape, ids
+
+
+def save_child(model, layers, shape, sortie, nom, fiche):
+    """Écrit l'enfant (embedding, norme finale et tête du modèle donné + les blocs listés) au format du projet."""
+    from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
+
+    shape = {**shape, "num_hidden_layers": len(layers)}
+    child = MiniMindForCausalLM(MiniMindConfig(vocab_size=model.config.vocab_size, **shape))
+    state = {k: v for k, v in model.state_dict().items() if ".layers." not in k}
+    for n, layer in enumerate(layers):
+        state.update({f"model.layers.{n}.{k}": v for k, v in layer.state_dict().items()})
+    child.load_state_dict(state)
+    os.makedirs(sortie, exist_ok=True)
+    path = os.path.join(sortie, f"{nom}_{shape['hidden_size']}.pth")
+    torch.save({k: v.half().cpu() for k, v in child.state_dict().items()}, path)
+    json.dump({**fiche, "config": shape}, open(os.path.join(sortie, f"{nom}.json"), "w"), indent=1)
+    print(f"{path} : {sum(p.numel() for p in child.parameters()) / 1e6:.1f}M paramètres")
+
+
+def cmd_tailler(args):
+    from transformers import AutoTokenizer
+
+    model, tok, shape, ids = load_parent(args.parent, args.tokenizer, args.device)
+    meta = {"ids": ids.tolist()}
 
     if args.verifier:  # notre code calcule-t-il la même chose que le code d'origine du parent ?
         from transformers import AutoModelForCausalLM
@@ -193,18 +219,8 @@ def cmd_tailler(args):
         print(f"{len(keep)} blocs : retrait du bloc {out}, loss {loss:.3f}", flush=True)
     print(f"blocs gardés : {keep} ; loss {with_layers(keep, calib):.3f} ; contrôle {with_layers(keep, control):.3f} (hasard : {np.log(len(tok)):.2f})")
 
-    shape["num_hidden_layers"] = len(keep)
-    child = MiniMindForCausalLM(MiniMindConfig(vocab_size=len(tok), **shape))
-    kept_state = {k: v for k, v in model.state_dict().items() if ".layers." not in k}
-    for n, i in enumerate(keep):
-        kept_state.update({f"model.layers.{n}.{k}": v for k, v in layers[i].state_dict().items()})
-    child.load_state_dict(kept_state)
-    os.makedirs(args.sortie, exist_ok=True)
-    path = os.path.join(args.sortie, f"{args.nom}_{shape['hidden_size']}.pth")
-    torch.save({k: v.half().cpu() for k, v in child.state_dict().items()}, path)
-    fiche = dict(parent=args.parent, blocs_gardes=keep, config=shape, tokenizer=os.path.relpath(args.tokenizer, DATA_DIR))
-    json.dump(fiche, open(os.path.join(args.sortie, f"{args.nom}.json"), "w"), indent=1)
-    print(f"{path} : {sum(p.numel() for p in child.parameters()) / 1e6:.1f}M paramètres")
+    fiche = dict(parent=args.parent, blocs_gardes=keep, tokenizer=os.path.relpath(args.tokenizer, DATA_DIR))
+    save_child(model, [layers[i] for i in keep], shape, args.sortie, args.nom, fiche)
 
 
 if __name__ == "__main__":

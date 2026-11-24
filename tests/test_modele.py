@@ -83,3 +83,21 @@ def test_ngrammes_ne_regardent_pas_le_futur():
     with torch.no_grad():
         a, b = model(x).logits, model(y).logits
     assert (a[:, :20] - b[:, :20]).abs().max() < 1e-5 and (a[:, 20:] - b[:, 20:]).abs().max() > 1e-4
+
+
+def test_heritage_par_regression_retrouve_le_parent():
+    """Moindres carrés bloc par bloc : avec une tranche par bloc, on doit retrouver la matrice effacée du parent."""
+    import copy
+
+    from trainer.heritage_regression import fill_by_least_squares
+
+    torch.manual_seed(0)
+    parent = MiniMindForCausalLM(MiniMindConfig(**SMALL)).float().eval()
+    layers = list(parent.model.layers)
+    child = [copy.deepcopy(layer) for layer in layers]
+    for layer in child:  # on efface ce que la régression doit retrouver
+        layer.mlp.down_proj.weight.data.zero_()
+    fill_by_least_squares(parent, child, list(range(len(layers) + 1)), torch.randint(0, 6400, (64, 48)), ridge=1e-9)
+    for mine, ref in zip(child, layers):
+        for a, b in ((mine.self_attn.o_proj, ref.self_attn.o_proj), (mine.mlp.down_proj, ref.mlp.down_proj)):
+            assert (a.weight - b.weight).norm() / b.weight.norm() < 0.05
