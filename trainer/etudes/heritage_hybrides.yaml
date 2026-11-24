@@ -1,0 +1,41 @@
+# Dissection de l'héritage (2/2) : quelle PARTIE du modèle hérité porte la valeur ?
+# Une partie vient du parent, l'autre de l'initialisation ordinaire (trainer/heritage_dissection.py). Les parties
+# aléatoires ont besoin de notre taux d'apprentissage habituel : toute l'étude l'utilise, repères compris.
+#   attention : attention héritée, FFN aléatoires     ffn : FFN hérités, attention aléatoire
+#   embedding : embedding hérité, blocs aléatoires    blocs : blocs hérités, embedding aléatoire
+# Repères de la même étude : intact-lr1 (héritage complet) et zero (tout aléatoire). 10M tokens par essai.
+name: heritage-hybrides
+sampler: grid
+data_file: fr_en/pretrain_fr65hq_q3.jsonl
+tokenizer_subdir: fr_en/tokenizer_q3_24k
+from_subdir: heritage
+base:
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  optimizer: muon
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 16
+  accumulation_steps: 4
+  max_tokens: 10000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 0
+  eval_interval: 500
+  log_interval: 100
+  seed: 42
+  hidden_size: 1024
+  num_hidden_layers: 8
+  num_attention_heads: 16
+  num_key_value_heads: 8
+  head_dim: 128
+  intermediate_size: 3072
+space:
+  variante:
+    intact-lr1: {from_weight: q3-06-b8}
+    attention: {from_weight: q3-06-b8-attention}
+    ffn: {from_weight: q3-06-b8-ffn}
+    embedding: {from_weight: q3-06-b8-embedding}
+    blocs: {from_weight: q3-06-b8-blocs}
+    zero: {}

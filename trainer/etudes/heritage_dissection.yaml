@@ -1,0 +1,43 @@
+# Dissection de l'héritage (1/2) : qu'est-ce qui, dans les blocs hérités, porte la valeur ?
+# Les blocs de l'enfant taillé (Qwen3-0.6B, 8 blocs) sont abîmés d'une façon précise avant l'entraînement
+# (trainer/heritage_dissection.py), puis réparés avec la même recette : 10M tokens, taux d'apprentissage réduit.
+#   signes : chaque poids devient −a, 0 ou +a (schéma de câblage seul, 1,58 bit par poids)
+#   spectre : mêmes valeurs singulières, directions au hasard   directions : mêmes directions, spectre plat
+#   desordre : blocs rangés dans l'ordre inverse
+# Repères de la même étude : intact (héritage complet) et zero-lr03 (poids aléatoires, même taux réduit).
+# Une variante qui finit près de « intact » montre que la propriété détruite ne comptait pas.
+name: heritage-dissection
+sampler: grid
+data_file: fr_en/pretrain_fr65hq_q3.jsonl
+tokenizer_subdir: fr_en/tokenizer_q3_24k
+from_subdir: heritage
+base:
+  muon_lr: 0.003
+  learning_rate: 2e-4
+  optimizer: muon
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 16
+  accumulation_steps: 4
+  max_tokens: 10000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 0
+  eval_interval: 500
+  log_interval: 100
+  seed: 42
+  hidden_size: 1024
+  num_hidden_layers: 8
+  num_attention_heads: 16
+  num_key_value_heads: 8
+  head_dim: 128
+  intermediate_size: 3072
+space:
+  variante:
+    intact: {from_weight: q3-06-b8}
+    signes: {from_weight: q3-06-b8-signes}
+    spectre: {from_weight: q3-06-b8-spectre}
+    directions: {from_weight: q3-06-b8-directions}
+    desordre: {from_weight: q3-06-b8-desordre}
+    zero-lr03: {}
