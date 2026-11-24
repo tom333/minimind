@@ -1,0 +1,35 @@
+# Héritage, essai de deux heures : même enfant et même recette que heritage-long, budget doublé (120M tokens).
+# Question : l'enfant hérité passe-t-il sous notre 71M entraîné sur 1 Md de tokens (~8 h) ? L'essai d'une heure
+# s'arrête juste au-dessus en français. Repères en bits par octet, 71M long / enfant à 1 h : web français sélectionné
+# 1,070 / 1,103 ; web français courant 1,203 / 1,238 ; Wikipédia 0,583 / 0,597 ; Wikisource 1,212 / 1,241 ;
+# anglais 1,120 / 1,085. De 29 min à 1 h, l'enfant a gagné environ 0,05 : on attend ~1,05 sur le web sélectionné.
+name: heritage-2h
+sampler: grid
+data_file: fr_en/pretrain_fr65hq_q3.jsonl
+tokenizer_subdir: fr_en/tokenizer_q3_24k
+from_subdir: heritage
+base:
+  optimizer: muon
+  muon_lr: 0.003
+  learning_rate: 2e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 16
+  accumulation_steps: 4
+  max_tokens: 120000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 2000
+  log_interval: 100
+  seed: 42
+  hidden_size: 1024
+  num_hidden_layers: 8
+  num_attention_heads: 16
+  num_key_value_heads: 8
+  head_dim: 128
+  intermediate_size: 3072
+space:
+  variante:
+    herite-2h: {from_weight: q3-06-b8}
