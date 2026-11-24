@@ -78,6 +78,11 @@ class MiniMindConfig(PretrainedConfig):
         self.memory_layers = tuple(kwargs.get("memory_layers", ()))
         self.memory_keys = kwargs.get("memory_keys", 256)
         self.memory_k = kwargs.get("memory_k", 8)
+        # Tables de n-grammes à l'entrée (cf. ngram.NgramEmbedding). () = aucune (origine).
+        # Une table de ngram_rows lignes × ngram_dim par ordre (2 = le token et son précédent, etc.).
+        self.ngram_orders = tuple(kwargs.get("ngram_orders", ()))
+        self.ngram_rows = kwargs.get("ngram_rows", 262144)
+        self.ngram_dim = kwargs.get("ngram_dim", 64)
         self.memory_heads = kwargs.get("memory_heads", 2)
         self.memory_query_dim = kwargs.get("memory_query_dim", 256)
         # Poids ternaires (cf. ternary.TernaryLinear) pour les matrices des blocs :

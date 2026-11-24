@@ -71,3 +71,15 @@ def test_diffusion_masquee_loss_finie_et_reproductible():
     a = mdm_loss(model, x, generator=torch.Generator().manual_seed(0))
     b = mdm_loss(model, x, generator=torch.Generator().manual_seed(0))
     assert torch.isfinite(a) and a.item() == b.item()
+
+
+def test_ngrammes_ne_regardent_pas_le_futur():
+    """Tables de n-grammes : changer un token ne modifie aucune sortie des positions précédentes."""
+    torch.manual_seed(0)
+    model = MiniMindForCausalLM(MiniMindConfig(ngram_orders=(2, 3, 4), ngram_rows=1024, ngram_dim=16, **SMALL)).eval()
+    x = torch.randint(0, 6400, (2, 32))
+    y = x.clone()
+    y[:, 20] = (y[:, 20] + 1) % 6400
+    with torch.no_grad():
+        a, b = model(x).logits, model(y).logits
+    assert (a[:, :20] - b[:, :20]).abs().max() < 1e-5 and (a[:, 20:] - b[:, 20:]).abs().max() > 1e-4

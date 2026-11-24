@@ -1,0 +1,30 @@
+# Tables de n-grammes à l'entrée : des paramètres LUS au lieu d'être multipliés (cf. model/ngram.py).
+# Le tronc reste le 71M ; chaque position reçoit en plus un vecteur lu dans une table, à la ligne donnée par
+# le hachage de ses 2, 3 et 4 derniers tokens. Question : la loss baisse-t-elle, pour un temps par pas inchangé ?
+# Repères sans tables, même recette et même budget (étude fr-en-court) : 3,462 (graine 42) et 3,456 (graine 43) ;
+# bruit 0,012. Repère de taille : le 150M dense au même budget, 3,375, pour un pas deux fois plus long.
+name: ngrammes
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+space:
+  variante:
+    ordres-234: {ngram_orders: "2,3,4"}                        # +50M paramètres (3 tables de 262 144 × 64)
+    ordres-234-lr10: {ngram_orders: "2,3,4", memory_lr_ratio: 10}  # tables apprises 10 fois plus vite
+    ordre-2: {ngram_orders: "2"}                               # +17M : la part due aux seules paires

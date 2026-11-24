@@ -8,6 +8,7 @@ from .attention import Attention, repeat_kv  # noqa: F401  (ré-exportés)
 from .config import MiniMindConfig
 from .feedforward import FeedForward, MOEFeedForward
 from .memory import MemoryLayer
+from .ngram import NgramEmbedding
 from .ternary import convert_to_ternary
 from .norm import RMSNorm
 from .rope import apply_rotary_pos_emb, precompute_freqs_cis  # noqa: F401
@@ -143,6 +144,7 @@ class MiniMindModel(nn.Module):
         # Embedding = table 6400 lignes × 768 colonnes : le token 500 → ligne 500.
         # Aléatoire au départ ; l'entraînement rapproche les vecteurs des tokens de sens proche.
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
+        self.ngram = NgramEmbedding(config) if getattr(config, "ngram_orders", ()) else None
         self.dropout = nn.Dropout(config.dropout)
         self.layers = nn.ModuleList(
             [MiniMindBlock(l, config) for l in range(self.num_hidden_layers)]
@@ -181,9 +183,12 @@ class MiniMindModel(nn.Module):
         start_pos = (
             past_key_values[0][0].shape[1] if past_key_values[0] is not None else 0
         )
-        hidden_states = self.dropout(
-            self.embed_tokens(input_ids)
-        )  # ids → vecteurs [B, T, 768]
+        hidden_states = self.embed_tokens(input_ids)  # ids → vecteurs [B, T, 768]
+        if self.ngram is not None:
+            if start_pos:  # le cache ne garde pas les tokens précédents, dont le hachage a besoin
+                raise NotImplementedError("tables de n-grammes : génération avec cache non gérée")
+            hidden_states = hidden_states + self.ngram(input_ids)
+        hidden_states = self.dropout(hidden_states)
         # Recompute RoPE buffers lost during meta-device init (transformers>=5.x)
         if self.freqs_cos[0, 0] == 0:
             freqs_cos, freqs_sin = precompute_freqs_cis(
