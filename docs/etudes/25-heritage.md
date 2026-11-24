@@ -28,13 +28,13 @@ fait en bits par octet sur les cinq jeux de test. Plus bas = mieux.
 | Hérité, notre taux d'apprentissage | 3,056 |
 | **Hérité, taux réduit à 30 %** | **2,982** |
 
-| Bits par octet | Hérité 29 min | Hérité 58 min | Hérité 2 h | Zéro, même forme, 29 min | Notre 71M zéro, 27 min | Notre 71M, 1 Md de tokens (~8 h) |
-|---|---|---|---|---|---|---|
-| Anglais | 1,123 | 1,085 | **1,055** | 1,347 | 1,311 | 1,120 |
-| Web français sélectionné | 1,154 | 1,103 | **1,061** | 1,284 | 1,232 | 1,070 |
-| Web français courant | 1,290 | 1,238 | **1,193** | 1,426 | 1,373 | 1,203 |
-| Wikipédia | 0,685 | 0,597 | **0,531** | 1,082 | 0,976 | 0,583 |
-| Wikisource | 1,296 | 1,241 | **1,196** | 1,443 | 1,388 | 1,212 |
+| Bits par octet | Hérité 29 min | Hérité 58 min | Hérité 2 h | Hérité 4 h | Zéro, même forme, 29 min | Notre 71M zéro, 27 min | Notre 71M, 1 Md de tokens (~8 h) |
+|---|---|---|---|---|---|---|---|
+| Anglais | 1,123 | 1,085 | 1,055 | **1,034** | 1,347 | 1,311 | 1,120 |
+| Web français sélectionné | 1,154 | 1,103 | 1,061 | **1,031** | 1,284 | 1,232 | 1,070 |
+| Web français courant | 1,290 | 1,238 | 1,193 | **1,160** | 1,426 | 1,373 | 1,203 |
+| Wikipédia | 0,685 | 0,597 | 0,531 | **0,488** | 1,082 | 0,976 | 0,583 |
+| Wikisource | 1,296 | 1,241 | 1,196 | **1,161** | 1,443 | 1,388 | 1,212 |
 
 Remplir l'enfant par régression sur les états internes du parent, sans entraînement de bout en bout (chaque bloc
 de l'enfant remplace une tranche de 3 ou 4 blocs du parent) :
@@ -50,6 +50,7 @@ de l'enfant remplace une tranche de 3 ou 4 blocs du parent) :
 
 - **L'héritage fonctionne.** À temps égal, l'enfant bat notre meilleur départ de zéro de 0,08 à 0,29 bit/octet.
   En 2 h, il passe devant notre 71M de 8 h sur les cinq jeux : environ 4 fois moins de temps à qualité égale.
+  En 4 h, il le devance de 0,04 à 0,10. Le gain par doublement de durée diminue : 0,05, puis 0,04, puis 0,03.
 - **La coupe détruit le modèle, l'entraînement le répare vite** : de 11 à 4,2 de loss en une minute.
 - **Il faut réduire le taux d'apprentissage** : le nôtre efface une partie de l'héritage.
 - **Imiter les états internes du parent perd nettement** contre l'entraînement ordinaire : un bloc ne peut pas
@@ -59,7 +60,7 @@ de l'enfant remplace une tranche de 3 ou 4 blocs du parent) :
 
 **Limites.** Une graine. L'enfant (150M) est comparé à un 71M : nous n'avons pas de 150M parti de zéro entraîné
 longtemps. Le découpage français/anglais de la validation n'est pas fiable dans ces études (même token pour le
-début et la fin des documents). Un essai de 4 h est en cours.
+début et la fin des documents).
 
 **Reproduire.** `trainer/heritage.py vocabulaire` puis `tailler` ; études `heritage.yaml`, `heritage_long.yaml`,
 `heritage_2h.yaml`, `heritage_4h.yaml` ; `trainer/heritage_regression.py`.
