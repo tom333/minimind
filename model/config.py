@@ -83,6 +83,11 @@ class MiniMindConfig(PretrainedConfig):
         self.ngram_orders = tuple(kwargs.get("ngram_orders", ()))
         self.ngram_rows = kwargs.get("ngram_rows", 262144)
         self.ngram_dim = kwargs.get("ngram_dim", 64)
+        # Grilles 3D à la place du FFN (cf. grid.GridFFN) dans les blocs listés. () = aucune (origine).
+        self.grid_layers = tuple(kwargs.get("grid_layers", ()))
+        self.grid_count = kwargs.get("grid_count", 16)  # grilles lues par bloc
+        self.grid_features = kwargs.get("grid_features", 8)  # nombres par case
+        self.grid_sizes = tuple(kwargs.get("grid_sizes", (4, 8, 16, 32)))  # cases par côté, du grossier au fin
         self.memory_heads = kwargs.get("memory_heads", 2)
         self.memory_query_dim = kwargs.get("memory_query_dim", 256)
         # Poids ternaires (cf. ternary.TernaryLinear) pour les matrices des blocs :

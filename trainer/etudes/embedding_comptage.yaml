@@ -1,0 +1,29 @@
+# Embedding rempli par le calcul (trainer/embedding_comptage.py) : les vecteurs des tokens viennent de la
+# décomposition du tableau de cooccurrences du corpus (comptage + SVD), sans entraînement ; les blocs partent de
+# leur initialisation ordinaire. Question : ce départ fait-il gagner du temps ?
+# Repère, même recette et même graine avec un embedding aléatoire (fr-en-court) : 4,850 au pas 250, 4,212 au pas
+# 500, 3,859 au pas 1000, 3,462 à la fin. Bruit : 0,012.
+name: embedding-comptage
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+from_subdir: heritage
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+space:
+  variante:
+    comptage: {from_weight: emb-comptage}

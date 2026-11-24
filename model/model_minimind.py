@@ -7,6 +7,7 @@ from transformers.modeling_outputs import MoeCausalLMOutputWithPast
 from .attention import Attention, repeat_kv  # noqa: F401  (ré-exportés)
 from .config import MiniMindConfig
 from .feedforward import FeedForward, MOEFeedForward
+from .grid import GridFFN
 from .memory import MemoryLayer
 from .ngram import NgramEmbedding
 from .ternary import convert_to_ternary
@@ -59,7 +60,10 @@ class MiniMindBlock(nn.Module):
         self.post_attention_layernorm = RMSNorm(
             config.hidden_size, eps=config.rms_norm_eps
         )
-        self.mlp = FeedForward(config) if not config.use_moe else MOEFeedForward(config)
+        if layer_id in getattr(config, "grid_layers", ()):  # le savoir du bloc dans des grilles 3D, pas des matrices
+            self.mlp = GridFFN(config)
+        else:
+            self.mlp = FeedForward(config) if not config.use_moe else MOEFeedForward(config)
         # couche mémoire optionnelle, en parallèle du FFN (même entrée normalisée, sortie ajoutée)
         self.memory = MemoryLayer(config) if layer_id in getattr(config, "memory_layers", ()) else None
         # Mixture-of-Depths : un bloc sur deux (les impairs) est « routé ». Le routeur donne une note par

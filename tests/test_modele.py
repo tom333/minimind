@@ -101,3 +101,13 @@ def test_heritage_par_regression_retrouve_le_parent():
     for mine, ref in zip(child, layers):
         for a, b in ((mine.self_attn.o_proj, ref.self_attn.o_proj), (mine.mlp.down_proj, ref.mlp.down_proj)):
             assert (a.weight - b.weight).norm() / b.weight.norm() < 0.05
+
+
+def test_grilles_3d_a_la_place_du_ffn():
+    """Grilles 3D : le modèle tourne, et les grilles comme les projections qui choisissent où lire reçoivent un gradient."""
+    torch.manual_seed(0)
+    model = MiniMindForCausalLM(MiniMindConfig(grid_layers=(0, 1, 2, 3), grid_count=4, grid_features=4, grid_sizes=(4, 8), **SMALL))
+    x = torch.randint(0, 6400, (2, 32))
+    model(x, labels=x).loss.backward()
+    grid_ffn = model.model.layers[0].mlp
+    assert grid_ffn.mem_grids[0].grad.abs().sum() > 0 and grid_ffn.coords.weight.grad.abs().sum() > 0

@@ -1,0 +1,26 @@
+# Trajectoire des poids : l'essai de référence (71M, 50M tokens), avec une copie des poids tous les 250 pas.
+# Sert à trainer/diag_trajectoire.py : le chemin des poids est-il assez régulier pour sauter la fin de
+# l'entraînement, ou pour la remplacer par une moyenne ? Repère : même recette et même graine que fr-en-court (3,462).
+name: trajectoire
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+  snapshot_interval: 250
+space:
+  seed: [42]

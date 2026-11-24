@@ -187,6 +187,9 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
                 best.update(val_loss=val_loss, step=global_step)
                 save_weights(f"{args.save_dir}/{args.save_weight}_{lm_config.hidden_size}_best.pth")
 
+        if args.snapshot_interval and (step % args.snapshot_interval == 0 or last_step) and is_main_process():
+            save_weights(f"{args.save_dir}/{args.save_weight}_{lm_config.hidden_size}_pas{global_step}.pth")
+
         # durée de session bientôt atteinte (machine louée ou gratuite) : point de reprise, puis arrêt propre
         time_up = args.max_hours > 0 and time.time() - run_start > args.max_hours * 3600 and step % args.accumulation_steps == 0
         if dist.is_initialized() and args.max_hours > 0:  # décision commune : celle de la carte la plus avancée
@@ -280,6 +283,10 @@ if __name__ == "__main__":
     parser.add_argument("--memory_layers", default="", type=str, help="Blocs recevant une couche mémoire, ex. '4' ou '2,5' (vide = aucune)")
     parser.add_argument("--memory_keys", default=256, type=int, help="Nb de sous-clés par moitié (table de memory_keys² lignes)")
     parser.add_argument("--memory_lr_ratio", default=1.0, type=float, help="Multiplicateur du LR AdamW pour la table et les clés de la mémoire")
+    parser.add_argument("--grid_layers", default="", type=str, help="Blocs dont le FFN est remplacé par des grilles 3D, ex. '0,1,2,3,4,5,6,7' (vide = aucun)")
+    parser.add_argument("--grid_count", default=16, type=int, help="Grilles 3D lues par bloc")
+    parser.add_argument("--grid_features", default=8, type=int, help="Nombres par case de grille")
+    parser.add_argument("--snapshot_interval", default=0, type=int, help="Garde une copie des poids tous les N pas (<nom>_<largeur>_pas<N>.pth) : étude de la trajectoire (0 = non)")
     parser.add_argument("--ngram_orders", default="", type=str, help="Tables de n-grammes à l'entrée, ex. '2,3,4' (vide = aucune)")
     parser.add_argument("--ngram_rows", default=262144, type=int, help="Lignes de la table de chaque ordre")
     parser.add_argument("--ngram_dim", default=64, type=int, help="Largeur des lignes des tables de n-grammes")
@@ -309,6 +316,7 @@ if __name__ == "__main__":
     if args.ternary: arch_overrides.update(ternary=args.ternary, ternary_hadamard=bool(args.ternary_hadamard))
     arch_overrides.update(hidden_act=args.hidden_act, ffn_glu=bool(args.ffn_glu), subln=bool(args.subln), ffn_shared=bool(args.ffn_shared), mod_capacity=args.mod_capacity)
     if args.memory_layers: arch_overrides.update(memory_layers=tuple(int(v) for v in args.memory_layers.split(',')), memory_keys=args.memory_keys)
+    if args.grid_layers: arch_overrides.update(grid_layers=tuple(int(v) for v in args.grid_layers.split(',')), grid_count=args.grid_count, grid_features=args.grid_features)
     if args.ngram_orders: arch_overrides.update(ngram_orders=tuple(int(v) for v in args.ngram_orders.split(',')), ngram_rows=args.ngram_rows, ngram_dim=args.ngram_dim)
     if args.ffn_btt_rank: arch_overrides.update(ffn_btt_rank=args.ffn_btt_rank, ffn_btt_mid=tuple(int(v) for v in args.ffn_btt_mid.split(',')))
     arch_overrides['vocab_size'] = len(AutoTokenizer.from_pretrained(args.tokenizer_path))
