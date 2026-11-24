@@ -13,6 +13,7 @@ validation, toutes les mesures sont faites sur l'autre moitié. Comme pour le mo
 du bloc de 340 tokens.
 
 Usage : python diag_comptage.py --a ../out/etude_fr-en-court/fr-en-court-t0_768.pth --b ../out/etude_fr-en-full/fr-en-full-t0_768.pth
+(modèle hérité : poids.pth@fiche.json, avec --vocab et --donnees du vocabulaire réduit)
 """
 
 import argparse
@@ -83,23 +84,28 @@ def selftest():
         assert (counts[m] == direct[np.searchsorted(values, queries[m])]).all(), f"ordre {m}"
 
 
-def neural_logp(path, blocks, vocab):
+def neural_logp(spec, blocks, vocab, device):
+    """log-probabilité du bon token à chaque position. spec : poids.pth, ou poids.pth@fiche.json (modèle hérité)."""
+    import json
+
     import torch
 
     from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
 
+    path, _, fiche = spec.partition("@")
     cache = f"/tmp/diag_comptage_{os.path.basename(path)}_{len(blocks)}.npy"
     if os.path.exists(cache):
         return np.load(cache)
-    model = MiniMindForCausalLM(MiniMindConfig(vocab_size=vocab))
+    shape = json.load(open(fiche))["config"] if fiche else {}
+    model = MiniMindForCausalLM(MiniMindConfig(vocab_size=vocab, **shape))
     model.load_state_dict({k: v.float() for k, v in torch.load(path, map_location="cpu").items()})
-    model.eval()
+    model = model.to(device).eval()
     out = np.zeros(blocks.shape, dtype=np.float64)
-    with torch.no_grad():
+    with torch.no_grad(), torch.autocast(device, dtype=torch.bfloat16, enabled=device == "cuda"):
         for s in range(0, len(blocks), 16):
-            b = torch.from_numpy(blocks[s : s + 16].astype(np.int64))
+            b = torch.from_numpy(blocks[s : s + 16].astype(np.int64)).to(device)
             lp = model(b).logits[:, :-1].float().log_softmax(-1)
-            out[s : s + 16, 1:] = lp.gather(-1, b[:, 1:, None]).squeeze(-1).numpy()
+            out[s : s + 16, 1:] = lp.gather(-1, b[:, 1:, None]).squeeze(-1).cpu().numpy()
     np.save(cache, out)
     return out
 
@@ -113,11 +119,14 @@ if __name__ == "__main__":
     parser.add_argument("--ordres", type=int, default=10, help="ordre maximal des n-grammes comptés")
     parser.add_argument("--pas", type=int, default=5, help="un bloc de validation sur `pas`")
     parser.add_argument("--workers", type=int, default=10)
+    parser.add_argument("--device", default="cpu", help="cuda : les deux modèles passent d'abord, puis la carte est libre")
     args = parser.parse_args()
     selftest()
 
     val = np.load(f"{args.donnees}.val_rand2000.npy")
     blocks = val[: len(val) // SEQ * SEQ].reshape(-1, SEQ)[:: args.pas]
+    pa, pb = (np.exp(neural_logp(p, blocks, args.vocab, args.device)) for p in (args.a, args.b))
+    print(f"modèles évalués sur {blocks.size / 1e3:.0f}k tokens de validation", flush=True)
     train_path = f"{args.donnees}.train_rand2000.npy"
     total = len(np.load(train_path, mmap_mode="r"))
     N, tok = args.ordres, blocks.astype(np.uint64) + ONE
@@ -176,10 +185,6 @@ if __name__ == "__main__":
             mu[bucket == b] = best(mask) if mask.sum() >= 200 else default
         return mu * pc + (1 - mu) * pm
 
-    import torch
-
-    torch.set_num_threads(os.cpu_count())
-    pa, pb = (np.exp(neural_logp(p, blocks, args.vocab)) for p in (args.a, args.b))
     rows = {"comptage seul": pc, "A (entraîné peu)": pa, "B (entraîné longtemps)": pb, "A + comptage": mix(pa), "B + comptage": mix(pb)}
     loss = lambda p, mask: -np.log(p[mask]).mean()
     print(f"\n{'prédicteur':26}{'loss (moitié test)':>20}")
