@@ -111,3 +111,23 @@ def test_grilles_3d_a_la_place_du_ffn():
     model(x, labels=x).loss.backward()
     grid_ffn = model.model.layers[0].mlp
     assert grid_ffn.mem_grids[0].grad.abs().sum() > 0 and grid_ffn.coords.weight.grad.abs().sum() > 0
+
+
+def test_reduction_de_largeur_exacte_sans_perte():
+    """Rotation du flux résiduel + poids des normalisations fondus dans les matrices : sans rien couper (même
+    largeur, tous les neurones, tous les blocs), l'enfant calcule exactement la même chose que le parent."""
+    from trainer.heritage_largeur import carve_width
+
+    torch.manual_seed(0)
+    config = MiniMindConfig(**SMALL)
+    parent = MiniMindForCausalLM(config).float().eval()
+    for layer in parent.model.layers:  # des normalisations non triviales, à fondre dans les matrices
+        layer.input_layernorm.weight.data.uniform_(0.5, 1.5)
+        layer.post_attention_layernorm.weight.data.uniform_(0.5, 1.5)
+    x = torch.randint(0, 6400, (4, 40))
+    keep = list(range(config.num_hidden_layers))
+    state, _ = carve_width(parent, keep, config.hidden_size, config.intermediate_size, x, "cpu")
+    child = MiniMindForCausalLM(config).float().eval()
+    child.load_state_dict(state)
+    with torch.no_grad():
+        assert (child(x).logits - parent(x).logits).abs().max() < 1e-3

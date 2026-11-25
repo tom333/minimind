@@ -133,9 +133,10 @@ def loss_on(model, blocks, device):
     return nll / blocks[:, 1:].numel()
 
 
-def load_parent(parent, tokenizer_dir, device):
+def load_parent(parent, tokenizer_dir, device, check_parent=True):
     """Le parent entier dans notre classe de modèle, avec le vocabulaire réduit. Retourne (modèle, tokenizer,
-    forme, ids d'origine des tokens gardés)."""
+    forme, ids d'origine des tokens gardés). check_parent=False : parent d'une même famille, au même tokenizer
+    que celui pour lequel le vocabulaire a été réduit (ex. Qwen3-1.7B avec le vocabulaire réduit de Qwen3-0.6B)."""
     from huggingface_hub import snapshot_download
     from safetensors.torch import load_file
     from transformers import AutoTokenizer
@@ -144,7 +145,7 @@ def load_parent(parent, tokenizer_dir, device):
 
     tok = AutoTokenizer.from_pretrained(tokenizer_dir)
     meta = json.load(open(os.path.join(tokenizer_dir, "heritage.json")))
-    assert meta["parent"] == parent, "ce tokenizer a été réduit pour un autre parent"
+    assert meta["parent"] == parent or not check_parent, "ce tokenizer a été réduit pour un autre parent"
     folder = snapshot_download(parent, allow_patterns=["*.safetensors", "config.json"])
     cfg = json.load(open(os.path.join(folder, "config.json")))
     state = {}
