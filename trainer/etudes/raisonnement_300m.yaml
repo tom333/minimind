@@ -1,0 +1,45 @@
+# « 300M profond », pour le raisonnement. Le parent Qwen3-0.6B résout 53 % des problèmes de calcul d'école (GSM8K) et
+# comprend un texte français deux fois mieux que le hasard (56,6 %) ; l'enfant à 8 blocs a perdu les deux. Trois
+# changements à la fois :
+#   - profondeur : 16 blocs gardés sur 28 au lieu de 8 (276M paramètres) ;
+#   - contexte : 1 024 tokens au lieu de 340 (place pour écrire des étapes, consignes de GSM8K) ;
+#   - données : corpus sélectionné + ~25 % de problèmes résolus pas à pas (corpus/melange_raisonnement.py, MetaMathQA).
+# Lot de 4 séquences de 1 024 cumulé 5 fois (~20 500 tokens par pas, comme nos lots de 64 × 340). 150M tokens,
+# taux réduit (héritage). Arrêt de sécurité à 7 h 30, avec point de reprise sur le disque monté.
+# Repères (bancs, après l'essai) : parent 53,2 % au calcul d'école, 56,6 % en compréhension ; enfant à 8 blocs de
+# 4 h : impossible au calcul d'école (contexte), 23,6 % en compréhension ; SmolLM2-360M : 4,8 % au calcul d'école.
+name: raisonnement-300m
+sampler: grid
+data_file: fr_en/pretrain_raisonnement_q3.jsonl
+tokenizer_subdir: fr_en/tokenizer_q3_24k
+from_subdir: heritage
+base:
+  optimizer: muon
+  muon_lr: 0.003
+  learning_rate: 2e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 4
+  accumulation_steps: 5
+  max_seq_len: 1024
+  max_tokens: 150000000
+  max_hours: 7.5
+  resume_dir: /data/out/reprises/raisonnement-300m
+  packing: 1
+  use_compile: 1
+  save_resume: 1
+  save_interval: 1000
+  detailed_eval: 1
+  eval_interval: 1500
+  log_interval: 100
+  seed: 42
+  hidden_size: 1024
+  num_hidden_layers: 16
+  num_attention_heads: 16
+  num_key_value_heads: 8
+  head_dim: 128
+  intermediate_size: 3072
+  from_weight: q3-06-b16
+space:
+  variante:
+    profond-16: {}
