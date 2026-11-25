@@ -123,7 +123,7 @@ if __name__ == "__main__":
         )
         scores = {}
         for task, res in out["results"].items():
-            for key in ("acc_norm,none", "acc,none", "word_perplexity,none"):
+            for key in ("acc_norm,none", "acc,none", "exact_match,flexible-extract", "word_perplexity,none"):
                 if key in res:
                     scores[task] = (
                         key.split(",")[0],
