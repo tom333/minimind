@@ -67,3 +67,25 @@ def test_distillation_hors_ligne_identique_a_la_distillation_en_ligne(corpus, tm
     assert online.keys() == offline.keys() and all(abs(online[s] - offline[s]) < 2e-3 for s in online)
     out, again, _ = train(corpus, tmp_path / "relu", *common, "--teacher_cache", str(tmp_path / "cache"))
     assert "lues dans" in out and again == offline
+
+
+def test_comptage_pendant_l_entrainement(corpus, tmp_path):
+    """Comptage précalculé : l'occurrence propre de chaque token est bien retirée (sinon les suites rares d'un corpus
+    de mots tirés au hasard paraîtraient toutes certaines), et l'entraînement avec la loss de mélange tourne."""
+    import json
+    import subprocess
+    import sys
+
+    from conftest import ROOT
+
+    train(corpus, tmp_path / "base", "--save_resume", "0", steps=8)  # prépare les tokens en cache
+    cmd = [sys.executable, "comptage_cache.py", "--donnees", corpus, "--subset_tokens", "8192", "--seq", "64", "--val_docs", "20",
+           "--vocab", "6400", "--ordres", "6", "--workers", "2", "--sortie", str(tmp_path / "comptage")]
+    run = subprocess.run(cmd, cwd=os.path.join(ROOT, "trainer"), env=dict(os.environ, PYTHONPATH=ROOT), capture_output=True, text=True, timeout=600)
+    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+    meta = json.load(open(tmp_path / "comptage" / "meta.json"))
+    assert meta["part_quasi_certaine"] < 0.05
+    out, losses, val = train(corpus, tmp_path / "mix", "--save_resume", "0", "--train_subset_tokens", "8192", "--count_cache", str(tmp_path / "comptage"))
+    assert "comptage pendant l'entraînement" in out and losses and val is not None
+    _, plain, _ = train(corpus, tmp_path / "seul", "--save_resume", "0", "--train_subset_tokens", "8192")
+    assert losses[1] < plain[1] - 0.5  # dès le premier pas, le comptage aide la loss de mélange

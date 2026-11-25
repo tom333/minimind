@@ -12,6 +12,7 @@ Pour chaque début de texte, les deux méthodes écrivent la même longueur. On 
   - accord : part de mots identiques entre la sortie hybride et la sortie mot à mot.
 
 Usage : python eval_hybride.py poids_mixte.pth --juge ../out/etude_fr-en-full/fr-en-full-t0_768.pth
+(modèle hérité : poids.pth@fiche.json, avec --tokenizer_path et --mask_token de son vocabulaire)
 """
 
 import argparse
@@ -33,8 +34,11 @@ from trainer.diffusion import ar_generate, hybrid_generate, set_causal
 TEST_DIR = os.path.join(os.path.dirname(__file__), "..", "dataset", "fr_en", "test")
 
 
-def load(path, vocab, device):
-    model = MiniMindForCausalLM(MiniMindConfig(vocab_size=vocab))
+def load(spec, vocab, device):
+    """poids.pth, ou poids.pth@fiche.json pour un modèle hérité (forme donnée par la fiche, trainer/heritage.py)."""
+    path, _, fiche = spec.partition("@")
+    shape = json.load(open(fiche))["config"] if fiche else {}
+    model = MiniMindForCausalLM(MiniMindConfig(vocab_size=vocab, **shape))
     model.load_state_dict(
         {k: v.float() for k, v in torch.load(path, map_location="cpu").items()}
     )
@@ -81,9 +85,14 @@ if __name__ == "__main__":
     parser.add_argument("--accept", type=float, default=0.1)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--mlflow_experiment", default="minimind-eval-hybride")
+    parser.add_argument("--mask_token", default="", help="token de masquage, s'il diffère de celui de notre tokenizer (id 27)")
     args = parser.parse_args()
 
     tok = AutoTokenizer.from_pretrained(args.tokenizer_path)
+    if args.mask_token:
+        import trainer.diffusion as diffusion
+
+        diffusion.MASK_ID = tok.convert_tokens_to_ids(args.mask_token)
     model, judge = (
         load(args.mixte, len(tok), args.device),
         load(args.juge, len(tok), args.device),

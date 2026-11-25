@@ -106,10 +106,14 @@ class PackedPretrainDataset(Dataset):
         seq = int(self.index[index]) if getattr(self, "index", None) is not None else index
         block = self.tokens[seq * self.max_length:(seq + 1) * self.max_length]
         input_ids = torch.from_numpy(block.astype(np.int64))
+        out = [input_ids, input_ids.clone()]
         if getattr(self, "teacher", None) is not None:  # probabilités d'un enseignant précalculées, rangées comme le sous-ensemble
             ids, probs = self.teacher
-            return input_ids, input_ids.clone(), torch.from_numpy(ids[index].astype(np.int64)), torch.from_numpy(probs[index].astype(np.float32))
-        return input_ids, input_ids.clone()
+            out += [torch.from_numpy(ids[index].astype(np.int64)), torch.from_numpy(probs[index].astype(np.float32))]
+        if getattr(self, "counts", None) is not None:  # probabilité du bon token selon le comptage, et famille du contexte
+            logp, family = self.counts
+            out += [torch.from_numpy(logp[index].astype(np.float32)), torch.from_numpy(family[index].astype(np.int64))]
+        return tuple(out)
 
 class SFTDataset(Dataset):
     def __init__(self, jsonl_path, tokenizer, max_length=1024, system_prompts=None):

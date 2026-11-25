@@ -1,0 +1,38 @@
+# Hybride diffusion → mot à mot, rejugé sur un modèle bien meilleur : l'enfant hérité de 4 h (150M, qui dépasse notre
+# 71M de 8 h sur les cinq jeux de test). Comme dans l'étude hybride, on l'adapte aux DEUX objectifs, un pas sur deux,
+# avec un taux réduit, ici sur 30M tokens ; puis trainer/eval_hybride.py mesure la génération hybride.
+# Token de masquage : <|fim_pad|>, absent de nos corpus. Repères à 71M (étude 21) : acceptation du premier bloc
+# 16 à 39 %, 1,16 à 2,01 passes par mot, qualité au mieux égale au mot à mot. Loss mot à mot de départ : 2,654.
+name: heritage-hybride
+sampler: grid
+data_file: fr_en/pretrain_fr65hq_q3.jsonl
+tokenizer_subdir: fr_en/tokenizer_q3_24k
+from_subdir: etude_heritage-4h
+base:
+  muon_lr: 0.003
+  learning_rate: 2e-4
+  max_tokens: 30000000
+  detailed_eval: 0
+  eval_interval: 1000
+  objective: both
+  mask_token: "<|fim_pad|>"
+  from_weight: heritage-4h-t0
+  optimizer: muon
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 16
+  accumulation_steps: 4
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  log_interval: 100
+  seed: 42
+  hidden_size: 1024
+  num_hidden_layers: 8
+  num_attention_heads: 16
+  num_key_value_heads: 8
+  head_dim: 128
+  intermediate_size: 3072
+space:
+  variante:
+    mixte: {}

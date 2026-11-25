@@ -14,6 +14,7 @@ import time
 import warnings
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 from contextlib import nullcontext
 from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel
@@ -142,11 +143,18 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             if use_mdm:
                 loss = mdm_loss(model, input_ids)
             else:
-                res = model(input_ids, labels=labels)
-                loss = res.loss + res.aux_loss
-                if teacher is not None or cached:  # distillation : imiter les probabilités de l'enseignant sur ses k meilleurs tokens
+                res = model(input_ids, labels=None if args.count_cache else labels)
+                if args.count_cache:  # mélange avec le comptage : le modèle n'apprend que ce que le comptage ne sait pas
+                    logp_count, family = (t.to(args.device, non_blocking=True) for t in cached[-2:])
+                    logits = res.logits[:, :-1].float()
+                    ce = F.cross_entropy(logits.reshape(-1, logits.size(-1)), labels[:, 1:].reshape(-1), reduction='none').view_as(logp_count)
+                    gate = count_gate(family).squeeze(-1)  # logit de μ, appris par famille de contexte
+                    loss = -torch.logaddexp(F.logsigmoid(gate) + logp_count, F.logsigmoid(-gate) - ce).mean() + res.aux_loss
+                else:
+                    loss = res.loss + res.aux_loss
+                if teacher is not None or args.teacher_cache:  # distillation : imiter les probabilités de l'enseignant sur ses k meilleurs tokens
                     with torch.no_grad():
-                        if cached:  # précalculées une fois pour toutes (distillation hors ligne, trainer/enseignant_cache.py)
+                        if args.teacher_cache:  # précalculées une fois pour toutes (distillation hors ligne, trainer/enseignant_cache.py)
                             t_idx, t_prob = cached[0].to(args.device, non_blocking=True), cached[1].to(args.device, non_blocking=True)
                         else:
                             t_logits = teacher(input_ids).logits[:, :-1].float() / args.distill_temp
@@ -268,12 +276,15 @@ if __name__ == "__main__":
     parser.add_argument("--ternary", default="", choices=["", "matrix", "row", "group"], help="Poids ternaires −1/0/+1 dans les blocs (échelle par matrice, par ligne ou par groupe de 128)")
     parser.add_argument("--train_subset_tokens", default=0, type=int, help="Ne garder que ~N tokens d'entraînement, tirés au hasard (étude de la répétition, avec --epochs)")
     parser.add_argument("--teacher", default="", type=str, help="Poids d'un modèle ENSEIGNANT (même tokenizer) : distillation de ses probabilités")
+    parser.add_argument("--count_cache", default="", type=str, help="Dossier produit par comptage_cache.py : loss de mélange avec le prédicteur par comptage (demande --train_subset_tokens)")
+    parser.add_argument("--count_gate_lr_ratio", default=30.0, type=float, help="Multiplicateur du taux d'apprentissage des poids du mélange (une valeur par famille de contexte)")
     parser.add_argument("--teacher_cache", default="", type=str, help="Dossier des probabilités de l'enseignant précalculées (distillation hors ligne) ; calculées au premier essai si absentes")
     parser.add_argument("--teacher_hidden_size", default=768, type=int)
     parser.add_argument("--teacher_layers", default=8, type=int)
     parser.add_argument("--distill_alpha", default=0.9, type=float, help="Part de la distillation dans la loss (le reste : cross-entropy sur les vrais tokens)")
     parser.add_argument("--distill_temp", default=1.0, type=float, help="Température de la distillation")
     parser.add_argument("--distill_topk", default=50, type=int, help="Probabilités de l'enseignant limitées à ses k meilleurs tokens (Peng et al. 2024)")
+    parser.add_argument("--mask_token", default="", type=str, help="Token de masquage de la diffusion (défaut : <|buffer1|>, id 27, de notre tokenizer) ; ex. '<|fim_pad|>' pour le vocabulaire hérité de Qwen")
     parser.add_argument("--objective", default="ar", choices=["ar", "mdm", "both"], help="ar = mot à mot ; mdm = diffusion masquée (attention bidirectionnelle) ; both = alternance")
     parser.add_argument("--ternary_start", default=0.0, type=float, help="Fraction de l'entraînement faite en 16 bits avant de passer au ternaire (0 = ternaire dès le départ)")
     parser.add_argument("--ternary_ramp", default=0.02, type=float, help="Durée (fraction des pas) de la rampe 16 bits → ternaire")
@@ -325,6 +336,10 @@ if __name__ == "__main__":
     if args.ngram_orders: arch_overrides.update(ngram_orders=tuple(int(v) for v in args.ngram_orders.split(',')), ngram_rows=args.ngram_rows, ngram_dim=args.ngram_dim)
     if args.ffn_btt_rank: arch_overrides.update(ffn_btt_rank=args.ffn_btt_rank, ffn_btt_mid=tuple(int(v) for v in args.ffn_btt_mid.split(',')))
     arch_overrides['vocab_size'] = len(AutoTokenizer.from_pretrained(args.tokenizer_path))
+    if args.mask_token:  # la diffusion lit MASK_ID dans son module à chaque appel
+        import trainer.diffusion as diffusion
+        diffusion.MASK_ID = AutoTokenizer.from_pretrained(args.tokenizer_path).convert_tokens_to_ids(args.mask_token)
+        Logger(f'diffusion : token de masquage {args.mask_token} (id {diffusion.MASK_ID})')
     lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=bool(args.use_moe), **arch_overrides)
     resume_dir = args.resume_dir or '../checkpoints'
     # un point de reprise au milieu d'un cumul de gradient perdrait les gradients déjà accumulés
@@ -386,6 +401,14 @@ if __name__ == "__main__":
         val_loader = DataLoader(val_ds, batch_size=args.batch_size)
     if args.train_subset_tokens:
         train_ds.restrict(args.train_subset_tokens)
+    count_gate = None
+    if args.count_cache:  # comptage pendant l'entraînement (trainer/comptage_cache.py), même sous-ensemble de séquences
+        meta = json.load(open(os.path.join(args.count_cache, 'meta.json')))
+        assert args.train_subset_tokens and meta['subset_tokens'] == args.train_subset_tokens and meta['sequences'] == len(train_ds) and meta['seq'] == args.max_seq_len, f"comptage fait pour un autre sous-ensemble : {meta}"
+        train_ds.counts = tuple(np.load(os.path.join(args.count_cache, f), mmap_mode='r') for f in ('logp.npy', 'famille.npy'))
+        count_gate = torch.nn.Embedding(256, 1).to(args.device)
+        torch.nn.init.zeros_(count_gate.weight)  # μ = 0,5 au départ
+        Logger(f"comptage pendant l'entraînement : {args.count_cache} (loss du comptage seul {-meta['logp_moyen']:.3f})")
         Logger(f'répétition : {len(train_ds)} séquences gardées (~{len(train_ds) * args.max_seq_len / 1e6:.0f}M tokens)')
     tokens_per_step = args.batch_size * args.max_seq_len * world_size  # mode distribué : un lot par carte et par pas
     steps_per_epoch = (len(train_ds) + args.batch_size * world_size - 1) // (args.batch_size * world_size)
@@ -409,6 +432,7 @@ if __name__ == "__main__":
     decay = [p for p in model.parameters() if p.dim() >= 2 and id(p) not in muon_ids]
     no_decay = [p for p in model.parameters() if p.dim() < 2]
     optimizer = optim.AdamW([{'params': decay, 'weight_decay': args.weight_decay}, {'params': no_decay, 'weight_decay': 0.0}] + ([{'params': mem_params, 'weight_decay': 0.0, 'lr_ratio': args.memory_lr_ratio}] if mem_params else []), lr=args.learning_rate)
+    if count_gate is not None: optimizer.add_param_group({'params': list(count_gate.parameters()), 'weight_decay': 0.0, 'lr_ratio': args.count_gate_lr_ratio})
     optimizers = [optimizer]
     if args.optimizer == 'muon':
         optimizers.append(torch.optim.Muon([{'params': muon_params, 'lr_ratio': args.muon_lr / args.learning_rate}], lr=args.muon_lr, weight_decay=args.weight_decay))

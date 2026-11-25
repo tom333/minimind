@@ -1,0 +1,32 @@
+# Comptage pendant l'entraînement (trainer/comptage_cache.py) : la loss devient −log(μ·p_comptage + (1−μ)·p_modèle),
+# avec μ appris par famille de contexte ; le modèle n'apprend que ce que le comptage (suites de 1 à 10 tokens dans tout
+# le corpus, occurrence propre retirée) ne sait pas. Même sous-ensemble de 50M tokens, même graine et même recette
+# que le témoin de l'étude distillation-hors-ligne ; lot de 32 cumulé deux fois (mêmes lots globaux de 64), car les
+# probabilités par token prennent plus de mémoire.
+# La val_loss affichée pendant l'essai est celle du modèle SEUL (il s'appuie sur le comptage, elle sera moins bonne).
+# Mesure qui compte, faite ensuite par diag_comptage.py : modèle + comptage, contre témoin + comptage (même mélange).
+# Repères (corpus fr65, modèle de 27 min) : témoin seul 3,444, témoin + comptage 3,215 (diag_comptage, étude 26).
+name: comptage-entrainement
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 32
+  accumulation_steps: 2
+  max_tokens: 50000000
+  train_subset_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+space:
+  variante:
+    melange: {count_cache: /data/out/comptage/fr65-sub50M}
