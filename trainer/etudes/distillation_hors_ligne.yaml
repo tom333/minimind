@@ -1,0 +1,32 @@
+# Distillation hors ligne (trainer/enseignant_cache.py) : les probabilités de l'enseignant sont calculées UNE fois
+# sur les séquences d'entraînement et rangées sur disque ; l'élève les lit comme les tokens. Plus de calcul de
+# l'enseignant à chaque pas, plus de lot réduit : l'élève va à la vitesse d'un entraînement ordinaire.
+# Même enseignant et même recette que l'étude distillation (température 1, top-50, 90 % d'imitation), 50M tokens,
+# lot de 64. Les deux essais lisent le même sous-ensemble de 50M tokens (une seule passe) ; le témoin sans enseignant
+# contrôle l'effet de ce tirage. Le calcul de l'enseignant (une fois, ~10 min) est mesuré à part.
+# Repères : sans enseignant 3,459 (27 min) ; distillation en ligne 3,364 (42 min). Bruit : 0,012.
+name: distillation-hors-ligne
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 64
+  accumulation_steps: 1
+  max_tokens: 50000000
+  train_subset_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+space:
+  variante:
+    hors-ligne: {teacher: /data/out/etude_fr-en-full/fr-en-full-t0_768.pth, teacher_cache: /data/out/enseignant/fr65-71M-top50}
+    temoin: {}

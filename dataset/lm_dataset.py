@@ -103,10 +103,12 @@ class PackedPretrainDataset(Dataset):
         self.index = torch.randperm(total, generator=g)[: n_tokens // self.max_length].sort().values.numpy()
 
     def __getitem__(self, index):
-        if getattr(self, "index", None) is not None:
-            index = int(self.index[index])
-        block = self.tokens[index * self.max_length:(index + 1) * self.max_length]
+        seq = int(self.index[index]) if getattr(self, "index", None) is not None else index
+        block = self.tokens[seq * self.max_length:(seq + 1) * self.max_length]
         input_ids = torch.from_numpy(block.astype(np.int64))
+        if getattr(self, "teacher", None) is not None:  # probabilités d'un enseignant précalculées, rangées comme le sous-ensemble
+            ids, probs = self.teacher
+            return input_ids, input_ids.clone(), torch.from_numpy(ids[index].astype(np.int64)), torch.from_numpy(probs[index].astype(np.float32))
         return input_ids, input_ids.clone()
 
 class SFTDataset(Dataset):

@@ -114,7 +114,7 @@ run_start, stopped_early = time.time(), [False]  # pour --max_hours
 def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
     start_time = time.time()
     eval_seconds[0] = 0.0
-    for step, (input_ids, labels) in enumerate(loader, start=start_step + 1):
+    for step, (input_ids, labels, *cached) in enumerate(loader, start=start_step + 1):
         global_step = epoch * iters + step
         last_step = step == iters or global_step >= stop_step
         input_ids = input_ids.to(args.device)
@@ -144,11 +144,14 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             else:
                 res = model(input_ids, labels=labels)
                 loss = res.loss + res.aux_loss
-                if teacher is not None:  # distillation : imiter les probabilités de l'enseignant sur ses k meilleurs tokens
+                if teacher is not None or cached:  # distillation : imiter les probabilités de l'enseignant sur ses k meilleurs tokens
                     with torch.no_grad():
-                        t_logits = teacher(input_ids).logits[:, :-1].float() / args.distill_temp
-                        t_val, t_idx = t_logits.topk(args.distill_topk, dim=-1)
-                        t_prob = t_val.softmax(-1)
+                        if cached:  # précalculées une fois pour toutes (distillation hors ligne, trainer/enseignant_cache.py)
+                            t_idx, t_prob = cached[0].to(args.device, non_blocking=True), cached[1].to(args.device, non_blocking=True)
+                        else:
+                            t_logits = teacher(input_ids).logits[:, :-1].float() / args.distill_temp
+                            t_val, t_idx = t_logits.topk(args.distill_topk, dim=-1)
+                            t_prob = t_val.softmax(-1)
                     s_logp = (res.logits[:, :-1].float() / args.distill_temp).log_softmax(-1).gather(-1, t_idx)
                     kl = (t_prob * (t_prob.clamp_min(1e-9).log() - s_logp)).sum(-1).mean() * args.distill_temp ** 2
                     loss = args.distill_alpha * kl + (1 - args.distill_alpha) * res.loss + res.aux_loss
@@ -265,6 +268,7 @@ if __name__ == "__main__":
     parser.add_argument("--ternary", default="", choices=["", "matrix", "row", "group"], help="Poids ternaires −1/0/+1 dans les blocs (échelle par matrice, par ligne ou par groupe de 128)")
     parser.add_argument("--train_subset_tokens", default=0, type=int, help="Ne garder que ~N tokens d'entraînement, tirés au hasard (étude de la répétition, avec --epochs)")
     parser.add_argument("--teacher", default="", type=str, help="Poids d'un modèle ENSEIGNANT (même tokenizer) : distillation de ses probabilités")
+    parser.add_argument("--teacher_cache", default="", type=str, help="Dossier des probabilités de l'enseignant précalculées (distillation hors ligne) ; calculées au premier essai si absentes")
     parser.add_argument("--teacher_hidden_size", default=768, type=int)
     parser.add_argument("--teacher_layers", default=8, type=int)
     parser.add_argument("--distill_alpha", default=0.9, type=float, help="Part de la distillation dans la loss (le reste : cross-entropy sur les vrais tokens)")
@@ -445,7 +449,12 @@ if __name__ == "__main__":
         start_step = ckp_data.get('step', 0)
     
     teacher = None
-    if args.teacher:  # enseignant figé, même tokenizer ; ses probabilités sont recalculées à chaque pas
+    if args.teacher_cache:  # distillation hors ligne : l'enseignant ne passe qu'une fois, avant l'entraînement
+        assert args.teacher and args.train_subset_tokens and args.distill_temp == 1.0, "--teacher_cache demande --teacher, --train_subset_tokens et une température de 1"
+        from trainer.enseignant_cache import build_or_load
+        train_ds.teacher = build_or_load(args, train_ds, lm_config.vocab_size, Logger)
+        Logger(f'distillation hors ligne : alpha {args.distill_alpha}, top-{args.distill_topk}')
+    elif args.teacher:  # enseignant figé, même tokenizer ; ses probabilités sont recalculées à chaque pas
         teacher = MiniMindForCausalLM(MiniMindConfig(hidden_size=args.teacher_hidden_size, num_hidden_layers=args.teacher_layers, vocab_size=lm_config.vocab_size))
         teacher.load_state_dict({k: v.float() for k, v in torch.load(args.teacher, map_location='cpu').items()})
         teacher = teacher.to(args.device).eval().requires_grad_(False)

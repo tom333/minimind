@@ -54,3 +54,16 @@ def test_arret_anticipe_garde_le_calendrier_de_l_essai_complet(corpus, tmp_path)
     assert max(losses) == 8 and val is not None
     _, full, _ = train(corpus, tmp_path / "f", "--save_resume", "0")
     assert all(full[s] == v for s, v in losses.items())
+
+
+def test_distillation_hors_ligne_identique_a_la_distillation_en_ligne(corpus, tmp_path):
+    """Probabilités de l'enseignant précalculées une fois : mêmes losses, pas à pas, qu'en les recalculant à chaque pas."""
+    train(corpus, tmp_path / "prof", "--save_resume", "0", steps=8)
+    common = ("--save_resume", "0", "--teacher", str(tmp_path / "prof" / "t_64.pth"), "--teacher_hidden_size", "64",
+              "--teacher_layers", "2", "--train_subset_tokens", "8192", "--distill_topk", "8")
+    _, online, _ = train(corpus, tmp_path / "en_ligne", *common)
+    out, offline, _ = train(corpus, tmp_path / "hors_ligne", *common, "--teacher_cache", str(tmp_path / "cache"))
+    assert "calculées en" in out and os.path.exists(tmp_path / "cache" / "meta.json")
+    assert online.keys() == offline.keys() and all(abs(online[s] - offline[s]) < 2e-3 for s in online)
+    out, again, _ = train(corpus, tmp_path / "relu", *common, "--teacher_cache", str(tmp_path / "cache"))
+    assert "lues dans" in out and again == offline
