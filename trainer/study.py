@@ -13,6 +13,8 @@ Fichier d'étude (cf. trainer/etudes/*.yaml) :
   elagage: {etude: fr-en-court, marge: 0.15, apres: 0.3}   # arrêt si la val_loss dépasse de `marge` la courbe du
                                 # meilleur essai de l'étude citée, au même pas, passé la fraction `apres` de cette courbe
   base: {max_tokens: 50000000}  # arguments communs passés à train_pretrain.py
+                                # stop_fraction: 0.3 dans base = comparaison rapide : chaque essai s'arrête à 30 % de son
+                                # parcours ; le meilleur à 30 % reste le meilleur à la fin dans 93 % des cas (diag_prediction.py)
   data_file: sft_t2t_mini.jsonl # fichier du dossier de données (défaut : pretrain_t2t_mini.jsonl)
   from_subdir: full             # sous-dossier des sorties contenant les poids de départ (--from_weight)
   space:                        # un axe par clé

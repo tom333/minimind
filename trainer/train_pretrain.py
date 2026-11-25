@@ -116,7 +116,7 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
     eval_seconds[0] = 0.0
     for step, (input_ids, labels) in enumerate(loader, start=start_step + 1):
         global_step = epoch * iters + step
-        last_step = step == iters or global_step >= total_steps
+        last_step = step == iters or global_step >= stop_step
         input_ids = input_ids.to(args.device)
         labels = labels.to(args.device)
         warmup_steps = int(args.warmup_ratio * total_steps)
@@ -213,7 +213,7 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             Logger(f'arrêt programmé au pas {global_step} après {args.max_hours} h : relancer avec --from_resume 1')
             stopped_early[0] = True
             return True
-        if global_step >= total_steps: return True
+        if global_step >= stop_step: return True
     return False
 
 
@@ -286,6 +286,7 @@ if __name__ == "__main__":
     parser.add_argument("--grid_layers", default="", type=str, help="Blocs dont le FFN est remplacé par des grilles 3D, ex. '0,1,2,3,4,5,6,7' (vide = aucun)")
     parser.add_argument("--grid_count", default=16, type=int, help="Grilles 3D lues par bloc")
     parser.add_argument("--grid_features", default=8, type=int, help="Nombres par case de grille")
+    parser.add_argument("--stop_fraction", default=0.0, type=float, help="Arrêt (avec évaluation finale) à cette fraction des pas, le taux d'apprentissage suivant le calendrier de l'essai complet : comparer des réglages sans finir les essais (0 = essai complet)")
     parser.add_argument("--snapshot_interval", default=0, type=int, help="Garde une copie des poids tous les N pas (<nom>_<largeur>_pas<N>.pth) : étude de la trajectoire (0 = non)")
     parser.add_argument("--ngram_orders", default="", type=str, help="Tables de n-grammes à l'entrée, ex. '2,3,4' (vide = aucune)")
     parser.add_argument("--ngram_rows", default=262144, type=int, help="Lignes de la table de chaque ordre")
@@ -387,6 +388,8 @@ if __name__ == "__main__":
     total_steps = args.epochs * steps_per_epoch
     if args.max_tokens > 0: total_steps = min(total_steps, args.max_tokens // tokens_per_step)
     if args.max_steps > 0: total_steps = min(total_steps, args.max_steps)
+    # lecture anticipée : même calendrier du taux d'apprentissage que l'essai complet, arrêt à une fraction du parcours
+    stop_step = max(1, int(args.stop_fraction * total_steps)) if args.stop_fraction > 0 else total_steps
     Logger(f'train: {len(train_ds)} séquences, total_steps: {total_steps} (~{total_steps * tokens_per_step / 1e6:.0f}M tokens)')
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
     scaler = torch.amp.GradScaler('cuda', enabled=(args.dtype == 'float16'))

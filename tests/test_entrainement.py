@@ -45,3 +45,12 @@ def test_mode_distribue_deux_processus(corpus, tmp_path):
            "--num_workers", "0", "--save_resume", "0", "--save_dir", str(tmp_path / "d"), "--save_weight", "d"]
     run = subprocess.run(cmd, cwd=os.path.join(ROOT, "trainer"), env=env, capture_output=True, text=True, timeout=600)
     assert run.returncode == 0 and "step 6: val_loss" in run.stdout, run.stdout[-1500:] + run.stderr[-1500:]
+
+
+def test_arret_anticipe_garde_le_calendrier_de_l_essai_complet(corpus, tmp_path):
+    """--stop_fraction : arrêt au tiers du parcours, avec évaluation finale ; le taux d'apprentissage est celui de
+    l'essai complet au même pas (pas encore descendu à zéro)."""
+    out, losses, val = train(corpus, tmp_path / "s", "--save_resume", "0", "--stop_fraction", "0.34", "--eval_interval", "100")
+    assert max(losses) == 8 and val is not None
+    _, full, _ = train(corpus, tmp_path / "f", "--save_resume", "0")
+    assert all(full[s] == v for s, v in losses.items())
