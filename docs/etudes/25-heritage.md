@@ -58,6 +58,8 @@ de l'enfant remplace une tranche de 3 ou 4 blocs du parent) :
 - **Le parent limite le résultat** : Qwen3-0.6B est fort en anglais (0,823) mais à peine meilleur que notre 71M
   en français (1,009 contre 1,070 sur le web sélectionné).
 
+**Suite.** Ce que l'héritage transmet et perd : fiche 28 ; réduction de largeur : fiche 27.
+
 **Limites.** Une graine. L'enfant (150M) est comparé à un 71M : nous n'avons pas de 150M parti de zéro entraîné
 longtemps. Le découpage français/anglais de la validation n'est pas fiable dans ces études (même token pour le
 début et la fin des documents).

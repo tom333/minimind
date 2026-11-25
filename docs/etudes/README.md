@@ -1,6 +1,6 @@
 # Études
 
-Journal des expériences menées sur ce dépôt, du 16 au 24 novembre 2026. Chaque fiche répond à une
+Journal des expériences menées sur ce dépôt, du 16 au 25 novembre 2026. Chaque fiche répond à une
 question, avec son protocole, ses mesures, sa conclusion et ses limites. Les résultats négatifs y figurent
 au même titre que les autres.
 
@@ -43,6 +43,8 @@ au même titre que les autres.
 | [24](24-tables-de-ngrammes.md) | Tables de n-grammes à l'entrée | −0,018 pour un coût nul ; l'avance fond pendant l'entraînement | gain faible |
 | [25](25-heritage.md) | Hériter des poids d'un modèle existant | un 150M taillé dans Qwen3-0.6B dépasse notre 71M de 8 h en 2 h | gain majeur |
 | [26](26-comptage.md) | Que remplace le comptage ? | le comptage vaut 9 minutes d'entraînement, mais ajoute −0,045 bit/octet au modèle de 8 h | gain |
+| [27](27-negatifs-revisites.md) | Résultats négatifs, testés autrement | distillation hors ligne et réduction de largeur se rachètent ; embedding par comptage −0,033 à 200M tokens ; boucle, hybride, comptage pendant l'entraînement : négatifs | gain partiel |
+| [28](28-ce-que-l-heritage-transmet.md) | Ce que l'héritage transmet | la langue oui, le raisonnement non : la coupe, les données et le contexte l'ont jeté ; le parent résout 53 % du calcul d'école | constat |
 
 ## Le chemin parcouru, à budget égal (50M tokens)
 
