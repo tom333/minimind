@@ -88,6 +88,10 @@ class MiniMindConfig(PretrainedConfig):
         self.grid_count = kwargs.get("grid_count", 16)  # grilles lues par bloc
         self.grid_features = kwargs.get("grid_features", 8)  # nombres par case
         self.grid_sizes = tuple(kwargs.get("grid_sizes", (4, 8, 16, 32)))  # cases par côté, du grossier au fin
+        # Boucle (Loop Transformer, cf. MiniMindModel.forward) : les blocs loop_layers = (premier, dernier) sont exécutés
+        # loop_count fois de suite, chaque passage dosé par une porte par token. () = aucune boucle (origine).
+        self.loop_layers = tuple(kwargs.get("loop_layers", ()))
+        self.loop_count = kwargs.get("loop_count", 1)
         self.memory_heads = kwargs.get("memory_heads", 2)
         self.memory_query_dim = kwargs.get("memory_query_dim", 256)
         # Poids ternaires (cf. ternary.TernaryLinear) pour les matrices des blocs :

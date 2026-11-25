@@ -131,3 +131,23 @@ def test_reduction_de_largeur_exacte_sans_perte():
     child.load_state_dict(state)
     with torch.no_grad():
         assert (child(x).logits - parent(x).logits).abs().max() < 1e-3
+
+
+def test_boucle_portes_fermees_egale_au_modele_sans_boucle():
+    """Boucle : premier passage grand ouvert, passages suivants fermés → même calcul que sans boucle ;
+    avec la porte du second passage ouverte, le calcul change et les portes reçoivent un gradient."""
+    torch.manual_seed(0)
+    plain = MiniMindForCausalLM(MiniMindConfig(**SMALL)).float().eval()
+    looped = MiniMindForCausalLM(MiniMindConfig(loop_layers=(1, 2), loop_count=2, **SMALL)).float().eval()
+    missing, _ = looped.load_state_dict(plain.state_dict(), strict=False)
+    assert all("loop_gates" in k for k in missing)
+    x = torch.randint(0, 6400, (2, 32))
+    with torch.no_grad():
+        looped.model.loop_gates[0].bias.fill_(40.0)
+        looped.model.loop_gates[1].bias.fill_(-40.0)
+        assert (looped(x).logits - plain(x).logits).abs().max() < 1e-4
+        looped.model.loop_gates[1].bias.fill_(0.0)
+        assert (looped(x).logits - plain(x).logits).abs().max() > 1e-3
+    looped.train()
+    looped(x, labels=x).loss.backward()
+    assert looped.model.loop_gates[1].bias.grad.abs().sum() > 0

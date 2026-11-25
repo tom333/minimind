@@ -149,6 +149,17 @@ class MiniMindModel(nn.Module):
         # Aléatoire au départ ; l'entraînement rapproche les vecteurs des tokens de sens proche.
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
         self.ngram = NgramEmbedding(config) if getattr(config, "ngram_orders", ()) else None
+        # Boucle (GLM-5.4 ; Universal Transformer, 2018) : plus de profondeur sans plus de paramètres. Une porte par passage
+        # et par token dose la mise à jour écrite dans le flux résiduel (sinon l'ampleur des états explose d'un passage
+        # à l'autre). Au départ, le premier passage écrit presque tout (σ(4) = 0,98) et les suivants presque rien
+        # (σ(−2) = 0,12) : le modèle commence presque comme sans boucle, puis apprend à se servir des passages en plus.
+        self.loop = tuple(getattr(config, "loop_layers", ()))
+        self.loop_count = getattr(config, "loop_count", 1) if self.loop else 1
+        if self.loop:
+            self.loop_gates = nn.ModuleList([nn.Linear(config.hidden_size, 1) for _ in range(self.loop_count)])
+            for k, gate in enumerate(self.loop_gates):
+                nn.init.zeros_(gate.weight)
+                nn.init.constant_(gate.bias, 4.0 if k == 0 else -2.0)
         self.dropout = nn.Dropout(config.dropout)
         self.layers = nn.ModuleList(
             [MiniMindBlock(l, config) for l in range(self.num_hidden_layers)]
@@ -210,15 +221,30 @@ class MiniMindModel(nn.Module):
             self.freqs_sin[start_pos : start_pos + seq_length],
         )
         presents = []
-        for layer, past_key_value in zip(self.layers, past_key_values):
-            hidden_states, present = layer(
+        if self.loop and (use_cache or start_pos):
+            raise NotImplementedError("boucle : génération avec cache non gérée")
+        i = 0
+        while i < len(self.layers):
+            if self.loop and i == self.loop[0]:  # groupe en boucle : même poids, plusieurs passages
+                group = self.layers[self.loop[0] : self.loop[1] + 1]
+                for gate in self.loop_gates:
+                    start = hidden_states
+                    for layer in group:
+                        hidden_states, _ = layer(hidden_states, position_embeddings, attention_mask=attention_mask)
+                    g = torch.sigmoid(gate(F.rms_norm(start, (start.size(-1),))))  # [lot, longueur, 1]
+                    hidden_states = start + g * (hidden_states - start)
+                presents += [None] * len(group)
+                i = self.loop[1] + 1
+                continue
+            hidden_states, present = self.layers[i](
                 hidden_states,
                 position_embeddings,
-                past_key_value=past_key_value,
+                past_key_value=past_key_values[i],
                 use_cache=use_cache,
                 attention_mask=attention_mask,
             )
             presents.append(present)
+            i += 1
         hidden_states = self.norm(hidden_states)
         aux_loss = sum(
             [l.mlp.aux_loss for l in self.layers if isinstance(l.mlp, MOEFeedForward)]

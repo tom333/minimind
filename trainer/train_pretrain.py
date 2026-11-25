@@ -298,6 +298,9 @@ if __name__ == "__main__":
     parser.add_argument("--memory_layers", default="", type=str, help="Blocs recevant une couche mémoire, ex. '4' ou '2,5' (vide = aucune)")
     parser.add_argument("--memory_keys", default=256, type=int, help="Nb de sous-clés par moitié (table de memory_keys² lignes)")
     parser.add_argument("--memory_lr_ratio", default=1.0, type=float, help="Multiplicateur du LR AdamW pour la table et les clés de la mémoire")
+    parser.add_argument("--loop_layers", default="", type=str, help="Blocs exécutés en boucle, 'premier,dernier' (ex. '2,5') ; vide = aucune boucle")
+    parser.add_argument("--loop_count", default=2, type=int, help="Nombre de passages dans les blocs en boucle")
+    parser.add_argument("--loop_gate_lr_ratio", default=30.0, type=float, help="Multiplicateur du taux d'apprentissage AdamW des portes de la boucle")
     parser.add_argument("--grid_layers", default="", type=str, help="Blocs dont le FFN est remplacé par des grilles 3D, ex. '0,1,2,3,4,5,6,7' (vide = aucun)")
     parser.add_argument("--grid_count", default=16, type=int, help="Grilles 3D lues par bloc")
     parser.add_argument("--grid_features", default=8, type=int, help="Nombres par case de grille")
@@ -332,6 +335,7 @@ if __name__ == "__main__":
     if args.ternary: arch_overrides.update(ternary=args.ternary, ternary_hadamard=bool(args.ternary_hadamard))
     arch_overrides.update(hidden_act=args.hidden_act, ffn_glu=bool(args.ffn_glu), subln=bool(args.subln), ffn_shared=bool(args.ffn_shared), mod_capacity=args.mod_capacity)
     if args.memory_layers: arch_overrides.update(memory_layers=tuple(int(v) for v in args.memory_layers.split(',')), memory_keys=args.memory_keys)
+    if args.loop_layers: arch_overrides.update(loop_layers=tuple(int(v) for v in args.loop_layers.split(',')), loop_count=args.loop_count)
     if args.grid_layers: arch_overrides.update(grid_layers=tuple(int(v) for v in args.grid_layers.split(',')), grid_count=args.grid_count, grid_features=args.grid_features)
     if args.ngram_orders: arch_overrides.update(ngram_orders=tuple(int(v) for v in args.ngram_orders.split(',')), ngram_rows=args.ngram_rows, ngram_dim=args.ngram_dim)
     if args.ffn_btt_rank: arch_overrides.update(ffn_btt_rank=args.ffn_btt_rank, ffn_btt_mid=tuple(int(v) for v in args.ffn_btt_mid.split(',')))
@@ -425,14 +429,16 @@ if __name__ == "__main__":
             if n.endswith(('o_proj.weight', 'down_proj.weight')): torch.nn.init.zeros_(p)
     # Muon : matrices des blocs (q/k/v/o, gate/up/down) ; AdamW : embedding (partagé avec lm_head) et normes
     mem_params = [p for n, p in model.named_parameters() if 'mem_' in n]  # table et clés de la mémoire : AdamW, sans decay
-    muon_params = [p for n, p in model.named_parameters() if args.optimizer == 'muon' and p.dim() == 2 and 'embed_tokens' not in n and 'mem_' not in n]
+    loop_params = [p for n, p in model.named_parameters() if 'loop_gates' in n]  # portes de la boucle : AdamW rapide, sans decay
+    muon_params = [p for n, p in model.named_parameters() if args.optimizer == 'muon' and p.dim() == 2 and 'embed_tokens' not in n and 'mem_' not in n and 'loop_gates' not in n]
     # noyaux 3D des matrices structurées (BTT) : Muon appliqué bloc par bloc (trainer/muon.py)
     core_params = [p for p in model.parameters() if args.optimizer == 'muon' and p.dim() == 3]
-    muon_ids = {id(p) for p in muon_params + core_params + mem_params}
+    muon_ids = {id(p) for p in muon_params + core_params + mem_params + loop_params}
     decay = [p for p in model.parameters() if p.dim() >= 2 and id(p) not in muon_ids]
-    no_decay = [p for p in model.parameters() if p.dim() < 2]
+    no_decay = [p for p in model.parameters() if p.dim() < 2 and id(p) not in muon_ids]
     optimizer = optim.AdamW([{'params': decay, 'weight_decay': args.weight_decay}, {'params': no_decay, 'weight_decay': 0.0}] + ([{'params': mem_params, 'weight_decay': 0.0, 'lr_ratio': args.memory_lr_ratio}] if mem_params else []), lr=args.learning_rate)
     if count_gate is not None: optimizer.add_param_group({'params': list(count_gate.parameters()), 'weight_decay': 0.0, 'lr_ratio': args.count_gate_lr_ratio})
+    if loop_params: optimizer.add_param_group({'params': loop_params, 'weight_decay': 0.0, 'lr_ratio': args.loop_gate_lr_ratio})
     optimizers = [optimizer]
     if args.optimizer == 'muon':
         optimizers.append(torch.optim.Muon([{'params': muon_params, 'lr_ratio': args.muon_lr / args.learning_rate}], lr=args.muon_lr, weight_decay=args.weight_decay))
