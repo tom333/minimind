@@ -1,0 +1,29 @@
+# Distillation hors ligne, reprise : avec un lot de 64, les probabilités de l'élève sur tout le vocabulaire (en 32 bits,
+# pour la divergence) ne tiennent pas en mémoire. Lot de 32 cumulé deux fois, comme la distillation en ligne (mêmes
+# lots globaux). Les probabilités de l'enseignant, déjà calculées (12,2 min, une fois pour toutes), sont relues.
+# Repères : témoin sans enseignant, même sous-ensemble, 3,456 en 28 min (étude distillation-hors-ligne) ;
+# distillation en ligne 3,364 en 42 min. Bruit : 0,012.
+name: distillation-hors-ligne-32
+sampler: grid
+data_file: fr_en/pretrain_fr65.jsonl
+tokenizer_subdir: fr_en/tokenizer_fr65_16k
+base:
+  optimizer: muon
+  muon_lr: 0.01
+  learning_rate: 7e-4
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  batch_size: 32
+  accumulation_steps: 2
+  max_tokens: 50000000
+  train_subset_tokens: 50000000
+  packing: 1
+  use_compile: 1
+  save_resume: 0
+  detailed_eval: 1
+  eval_interval: 250
+  log_interval: 50
+  seed: 42
+space:
+  variante:
+    hors-ligne: {teacher: /data/out/etude_fr-en-full/fr-en-full-t0_768.pth, teacher_cache: /data/out/enseignant/fr65-71M-top50}

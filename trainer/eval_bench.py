@@ -38,7 +38,8 @@ TACHES["tout"] = TACHES["francais"] + TACHES["anglais"]
 
 
 def charger(spec, tokenizer_path, device):
-    """nom=chemin.pth (poids MiniMind), nom=hf:dépôt (modèle public) ou nom=registre:modèle@alias (registre MLflow)."""
+    """nom=chemin.pth (poids MiniMind), nom=chemin.pth@fiche.json (modèle hérité), nom=hf:dépôt (modèle public) ou
+    nom=registre:modèle@alias (registre MLflow)."""
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     name, path = spec.split("=", 1)
@@ -62,11 +63,14 @@ def charger(spec, tokenizer_path, device):
         )
         tok = AutoTokenizer.from_pretrained(folder)
         model = MiniMindForCausalLM.from_pretrained(folder, dtype=torch.float32)
-    else:
-        tok = AutoTokenizer.from_pretrained(tokenizer_path)
-        model = MiniMindForCausalLM(MiniMindConfig(vocab_size=len(tok)))
+    else:  # poids.pth, ou poids.pth@fiche.json pour un modèle hérité (forme et tokenizer dans la fiche)
+        weights, _, fiche = path.partition("@")
+        meta = json.load(open(fiche)) if fiche else {}
+        data_dir = os.environ.get("MINIMIND_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "dataset"))
+        tok = AutoTokenizer.from_pretrained(os.path.join(data_dir, meta["tokenizer"]) if fiche else tokenizer_path)
+        model = MiniMindForCausalLM(MiniMindConfig(vocab_size=len(tok), **meta.get("config", {})))
         model.load_state_dict(
-            {k: v.float() for k, v in torch.load(path, map_location="cpu").items()}
+            {k: v.float() for k, v in torch.load(weights, map_location="cpu").items()}
         )
     return name, path, model.to(device).eval(), tok
 
