@@ -37,6 +37,29 @@ TACHES = {
 TACHES["tout"] = TACHES["francais"] + TACHES["anglais"]
 
 
+def minimind_lm(**kwargs):
+    """Adaptateur de lm-evaluation-harness pour nos modèles. Leur méthode generate n'est pas celle de transformers (elle
+    ignore max_length et les chaînes d'arrêt) : pour les épreuves à rédaction (GSM8K), décodage glouton avec cache,
+    arrêté à la longueur maximale, au token de fin ou dès qu'une chaîne d'arrêt de l'épreuve apparaît."""
+    from lm_eval.models.huggingface import HFLM
+
+    class MiniMindLM(HFLM):
+        def _model_generate(self, context, max_length, stop, **generation_kwargs):
+            assert context.shape[0] == 1, "génération une question à la fois (--batch_size 1)"
+            out, past, start = context, None, context.shape[1]
+            with torch.no_grad(), torch.autocast(self.device.type, dtype=torch.bfloat16, enabled=self.device.type == "cuda"):
+                while out.shape[1] < max_length:
+                    done = past[0][0].shape[1] if past else 0
+                    res = self.model(out[:, done:], past_key_values=past, use_cache=True)
+                    past, nxt = res.past_key_values, res.logits[:, -1].argmax(-1, keepdim=True)
+                    out = torch.cat([out, nxt], dim=1)
+                    if nxt.item() == self.tokenizer.eos_token_id or any(t in self.tokenizer.decode(out[0, start:]) for t in stop):
+                        break
+            return out
+
+    return MiniMindLM(**kwargs)
+
+
 def charger(spec, tokenizer_path, device):
     """nom=chemin.pth (poids MiniMind), nom=chemin.pth@fiche.json (modèle hérité), nom=hf:dépôt (modèle public) ou
     nom=registre:modèle@alias (registre MLflow)."""
@@ -112,7 +135,7 @@ if __name__ == "__main__":
     table = {}
     for spec in args.modeles:
         name, path, model, tok = charger(spec, args.tokenizer_path, args.device)
-        lm = HFLM(
+        lm = (HFLM if path.startswith("hf:") else minimind_lm)(
             pretrained=model,
             tokenizer=tok,
             batch_size=args.batch_size,
