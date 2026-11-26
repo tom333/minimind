@@ -23,6 +23,7 @@ SkyPilot pour les GPU loués, Kaggle et Colab pour les GPU gratuits, tests et in
 | Les GPU gratuits sont-ils utilisables ? | Oui en fp16 : même loss qu'en bf16 à 0,001 près. Une T4 va à 58 % de la RTX 3060 ; les deux T4 de Kaggle, en entraînement distribué, s'en approchent. |
 | Faut-il partir de zéro ? | Non, si un modèle de même architecture existe : un 150M taillé dans Qwen3-0.6B (vocabulaire réduit, 8 blocs sur 28) dépasse notre 71M de 8 h après 2 h d'entraînement, soit environ 4 fois moins de temps à qualité égale. |
 | Que vaut un simple comptage du corpus ? | Seul, le niveau de 9 minutes d'entraînement. En complément d'un modèle, −0,045 bit/octet pour quelques minutes de processeur : plus qu'un doublement du modèle. |
+| Un petit modèle peut-il raisonner ? | En partie. Taillé à 16 blocs dans Qwen3-0.6B (276M), avec un contexte de 1 024 tokens et des problèmes résolus dans ses données, il résout 24,8 % des problèmes de calcul d'école (SmolLM2-360M : 4,8 %). Mais seulement en anglais (2 % en français), et la compréhension d'un texte reste au niveau du hasard. |
 
 Toutes les mesures sont accompagnées de leur repère dans les [fiches d'études](docs/etudes/README.md).
 
@@ -145,7 +146,8 @@ Les fiches : [docs/etudes](docs/etudes/README.md) — débit, validation et brui
 Muon, loi d'échelle, architecture, matrices structurées, couche mémoire, compression, poids ternaires,
 ajustement en conversation, évaluation et raisonnement, corpus, plateforme, ternaire (suite), accélération,
 routage des tokens, modèle de 150M, GPU externes, diffusion et hybride, industrialisation, distillation et
-répétition, tables de n-grammes, héritage, comptage.
+répétition, tables de n-grammes, héritage, comptage, négatifs revisités, ce que l'héritage transmet,
+raisonnement à 300M.
 
 ## Les données
 

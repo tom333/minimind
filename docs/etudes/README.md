@@ -1,6 +1,6 @@
 # Études
 
-Journal des expériences menées sur ce dépôt, du 16 au 25 novembre 2026. Chaque fiche répond à une
+Journal des expériences menées sur ce dépôt, du 16 au 26 novembre 2026. Chaque fiche répond à une
 question, avec son protocole, ses mesures, sa conclusion et ses limites. Les résultats négatifs y figurent
 au même titre que les autres.
 
@@ -45,6 +45,7 @@ au même titre que les autres.
 | [26](26-comptage.md) | Que remplace le comptage ? | le comptage vaut 9 minutes d'entraînement, mais ajoute −0,045 bit/octet au modèle de 8 h | gain |
 | [27](27-negatifs-revisites.md) | Résultats négatifs, testés autrement | distillation hors ligne et réduction de largeur se rachètent ; embedding par comptage −0,033 à 200M tokens ; boucle, hybride, comptage pendant l'entraînement : négatifs | gain partiel |
 | [28](28-ce-que-l-heritage-transmet.md) | Ce que l'héritage transmet | la langue oui, le raisonnement non : la coupe, les données et le contexte l'ont jeté ; le parent résout 53 % du calcul d'école | constat |
+| [29](29-300m-profond-raisonnement.md) | Un 300M profond qui calcule | 24,8 % au calcul d'école (SmolLM2-360M : 4,8 %), mais 2 % en français et compréhension au hasard | gain partiel |
 
 ## Le chemin parcouru, à budget égal (50M tokens)
 
